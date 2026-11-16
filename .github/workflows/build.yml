@@ -37,14 +37,19 @@ jobs:
       - name: Updater test
         run: python test_updater.py
 
-      # cloudflared.exe is NOT packed into the exe any more: a onefile exe unpacks everything to a temp folder on every
-      # start, and a 35 MB helper made the start slow (and the antivirus scanned it every time). The program
-      # downloads it once, when the internet link is switched on for the first time.
+      # Folder build: nothing is unpacked on start, so the 35 MB helper costs no start-up time. (If it is ever missing, the
+      # program downloads it by itself the first time the internet link is switched on.)
+      - name: Download cloudflared (internet link)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force bin | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile bin\cloudflared.exe
 
       - name: Build exe
         run: >
-          pyinstaller --noconsole --onefile --name PCPrint
+          pyinstaller --noconsole --onedir --name PCPrint
           --add-data "static;static"
+          --add-binary "bin\cloudflared.exe;bin"
           --exclude-module tkinter
           --hidden-import pystray._win32
           --hidden-import win32com.client
@@ -55,15 +60,17 @@ jobs:
           --collect-all clr_loader
           app.py
 
-      # The updater downloads this zip: it must hold PCPrint.exe.
+      # The updater downloads this zip: the CONTENT of the program folder (PCPrint.exe + _internal) at the top level.
       - name: Zip
-        shell: pwsh
-        run: Compress-Archive -Path dist\PCPrint.exe -DestinationPath PCPrint-windows.zip
+        shell: python
+        run: |
+          import shutil
+          shutil.make_archive("PCPrint-folder-windows", "zip", "dist/PCPrint")
 
       - uses: actions/upload-artifact@v4
         with:
           name: PCPrint
-          path: PCPrint-windows.zip
+          path: PCPrint-folder-windows.zip
 
       # Publish this build as a Release: installed programs see it, tell the user, and update after the user agrees.
       # Only for the main branch. Built as a draft first so nobody sees a release before the zip is attached.
@@ -76,6 +83,6 @@ jobs:
           NOTES: ${{ github.event.head_commit.message }}
         run: |
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" PCPrint-windows.zip --draft --target "$GITHUB_SHA" \
+          gh release create "$TAG" PCPrint-folder-windows.zip --draft --target "$GITHUB_SHA" \
             --title "Build ${{ github.run_number }}" --notes "${NOTES:-Manual build}"
           gh release edit "$TAG" --draft=false --latest
