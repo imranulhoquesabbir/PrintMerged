@@ -487,10 +487,30 @@ def ping():
     return jsonify(app="pcprint")
 
 
+def _hang_trace():
+    """DEBUG: after every /api/add (a file handed over by Image Fixer / Send to) write the stack of ALL threads to
+    hang_trace.txt (in the PCPrint settings folder) after 10 s and after 30 s.  If the window hangs, this file shows
+    where every thread is waiting.  Nothing is written when you never use /api/add."""
+    def run():
+        import faulthandler
+        for wait, tag in ((10, "after 10 s"), (20, "after 30 s")):
+            time.sleep(wait)
+            try:
+                os.makedirs(CFG_DIR, exist_ok=True)
+                with open(os.path.join(CFG_DIR, "hang_trace.txt"), "a", encoding="utf-8") as fh:
+                    fh.write("\n===== %s  (%s since /api/add) =====\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), tag))
+                    fh.flush()
+                    faulthandler.dump_traceback(file=fh, all_threads=True)
+            except Exception:
+                pass
+    threading.Thread(target=run, daemon=True).start()
+
+
 @app.post("/api/add")
 def add():
     d = request.get_json(silent=True) or {}
     paths = [str(p) for p in d.get("paths", [])]
+    _hang_trace()
     if HOOKS["front"]:      # the window comes up at once (in its own thread); opening a big PDF below can take a while
         threading.Thread(target=lambda: HOOKS["front"](), daemon=True).start()
     added, errors = register(paths, sort=True)

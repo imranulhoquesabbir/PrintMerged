@@ -31,46 +31,47 @@ def tray_image():
 
 
 def native_front():
-    """Windows does not let a program that runs in the background take the front: the window only blinks in the task bar
-    ("it just runs in the background"). The tap on ALT lifts that rule for this moment (same trick as printing.py)."""
+    """Windows does not let a program that runs in the background take the front: the window only blinks in the task bar.
+    The tap on ALT lifts that rule for this moment (same trick as printing.py).
+    Runs in a Flask thread, so it must never WAIT for the window's own (UI) thread: before, GetWindowTextW /
+    ShowWindow / BringWindowToTop on our own window sent messages to the UI thread and blocked until it answered
+    (a hang when the UI thread was busy).  Now: FindWindowW (no message), ShowWindowAsync (posts, does not wait).
+    Returns True when the window was found."""
     try:
         import ctypes
         from ctypes import wintypes
         u = ctypes.windll.user32
-        pid = os.getpid()
-        found = []
-
-        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-        def each(hwnd, _):
-            p = wintypes.DWORD()
-            u.GetWindowThreadProcessId(hwnd, ctypes.byref(p))
-            if p.value == pid:
-                buf = ctypes.create_unicode_buffer(64)
-                u.GetWindowTextW(hwnd, buf, 64)
-                if buf.value == "PC Print":
-                    found.append(hwnd)
-            return True
-        u.EnumWindows(each, 0)
-        for hwnd in found:
-            u.ShowWindow(hwnd, 9 if u.IsIconic(hwnd) else 5)     # SW_RESTORE / SW_SHOW
-            u.keybd_event(0x12, 0, 0, 0)                         # ALT down / up
-            u.keybd_event(0x12, 0, 2, 0)
-            u.BringWindowToTop(hwnd)
-            u.SetForegroundWindow(hwnd)
+        u.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+        u.FindWindowW.restype = wintypes.HWND
+        u.IsIconic.argtypes = [wintypes.HWND]
+        u.ShowWindowAsync.argtypes = [wintypes.HWND, ctypes.c_int]
+        u.SetForegroundWindow.argtypes = [wintypes.HWND]
+        u.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+        hwnd = u.FindWindowW(None, "PC Print")
+        if not hwnd:
+            return False
+        pid = wintypes.DWORD()
+        u.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value != os.getpid():          # another program has a window with the same title
+            return False
+        u.ShowWindowAsync(hwnd, 9 if u.IsIconic(hwnd) else 5)     # SW_RESTORE / SW_SHOW (hidden in the tray too)
+        u.keybd_event(0x12, 0, 0, 0)                              # ALT down / up
+        u.keybd_event(0x12, 0, 2, 0)
+        u.SetForegroundWindow(hwnd)
+        return True
     except Exception:
-        pass
+        return False
 
 
 def front():
     """Show the window (also when it is hidden in the tray) and bring it to the front."""
-    try:
+    if native_front():
+        return
+    try:                                       # fallback only when the native window was not found
         win.show()
         win.restore()
-        win.on_top = True
-        win.on_top = False
     except Exception:
         pass
-    native_front()
 
 
 def quit_app(*a):
