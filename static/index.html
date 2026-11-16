@@ -583,7 +583,7 @@ const key=(f,p)=>f+':'+p;
 function allPages(){
   const out=[];let n=0;
   FILES.forEach(f=>{for(let i=0;i<f.pages;i++){if(GONE.has(key(f.id,i)))continue;n++;
-    out.push({f:f.id,p:i,n,land:f.lands[i],name:f.name,label:`${f.name}${f.pages>1?' · page '+(i+1):''}`})}});
+    out.push({f:f.id,p:i,n,land:f.lands[i],asp:(f.asps&&f.asps[i])||(f.lands[i]?1.4142:0.7071),name:f.name,label:`${f.name}${f.pages>1?' · page '+(i+1):''}`})}});
   return out;
 }
 const selPages=()=>allPages().filter(p=>!DESEL.has(key(p.f,p.p)));
@@ -700,12 +700,18 @@ function setRZ(z){
   const ratio=span>0?P.scrollTop/span:0;
   RZ=z;P.style.setProperty('--rz',z);zoomLabel();
   const ns=P.scrollHeight-P.clientHeight;if(ns>0)P.scrollTop=ratio*ns;
-  clearTimeout(rzT);rzT=setTimeout(()=>{if(qFor(RZ)!==rzQ)reloadViews()},400);
+  clearTimeout(rzT);rzT=setTimeout(()=>{if(qFor(RZ)>rzQ)reloadViews()},600);
 }
 function setPZ(z){
   PZ=Math.max(.4,Math.min(4,Math.round(z*100)/100));zoomLabel();
   const w=pvSheetW()+'px';document.querySelectorAll('.pvsheet').forEach(x=>x.style.width=w);
-  clearTimeout(pzT);pzT=setTimeout(()=>{if(STEP===2&&pvNeedPw()!==PW)pvRender()},400);
+  clearTimeout(pzT);pzT=setTimeout(()=>{
+    if(STEP!==2)return;
+    const need=pvNeedPw();
+    if(need<=PW)return;                                    // zoom out / same detail: the picture we have is enough
+    if(pvUpgrade(need))return;                             // swapped in place: no flash, scroll position kept
+    PW=need;pvRender();
+  },700);
 }
 const zoomBy=f=>STEP===1?setRZ(RZ*f):setPZ(PZ*f);
 const zoomReset=()=>STEP===1?setRZ(1):setPZ(1);
@@ -745,7 +751,7 @@ function renderPages(){
   allPages().forEach(p=>{
     const k=key(p.f,p.p),on=!DESEL.has(k);
     const cb=el('input',{type:'checkbox',checked:on});
-    const im=el('img',{loading:'lazy',alt:'',src:viewSrc(p.f,p.p)});im.dataset.f=p.f;im.dataset.p=p.p;
+    const im=el('img',{loading:'lazy',alt:'',src:viewSrc(p.f,p.p)});im.dataset.f=p.f;im.dataset.p=p.p;im.style.aspectRatio=String(p.asp);
     const rp=el('div',{className:'rp'+(on?'':' off')},
       el('div',{className:'ph'},el('b',{className:'badge',textContent:p.n}),
         el('span',{className:'cap grow',textContent:p.label,title:p.label}),
@@ -1062,7 +1068,7 @@ async function loadPrinters(){
 async function loadCaps(){
   msg('Reading printer settings…');
   const r=await api('/api/printer?name='+encodeURIComponent($('#printer').value));
-  CAPS=await r.json();
+  CAPS=await r.json();PVV++;
   if(CAPS.error){msg('Error: '+CAPS.error);return}
   msg('');
   const P=$('#paper');P.innerHTML='';
@@ -1205,7 +1211,8 @@ let pvT=null;
 function pvRefresh(){clearTimeout(pvT);pvT=setTimeout(pvRender,250)}
 // any change in the settings panel refreshes the preview
 ['change','input'].forEach(ev=>$('#setp').addEventListener(ev,e=>{
-  if(STEP!==2||e.target.id==='printer'||e.target.id==='copies')return;
+  if(STEP!==2||e.target.id==='printer')return;
+  if(e.target.id==='copies'&&nupN()===1)return;   // copies only change the picture when copies fill a sheet (many pages on one sheet)
   pvRefresh();
 }));
 function pvSheetW(){
@@ -1217,39 +1224,90 @@ function pvSheetW(){
 function pvNeedPw(){const d=window.devicePixelRatio||1;return HQ?Math.min(3600,Math.max(1200,Math.ceil(pvSheetW()*d*1.5/120)*120)):Math.min(1800,Math.max(720,Math.ceil(pvSheetW()*d/120)*120))}
 function pvRender(){
   if(STEP!==2)return;
-  const stage=$('#pvstage');stage.innerHTML='';
+  const stage=$('#pvstage'),keepTop=stage.scrollTop;stage.innerHTML='';
   if(!CAPS||CAPS.error)return;
   const list=selPages();
   if(!list.length){stage.append(el('div',{className:'empty mut',textContent:'No pages selected. Go back and tick the pages to print.'}));return}
   PW=pvNeedPw();
-  if(nupN()>1){pvRenderN(list);return}
+  if(nupN()>1){pvRenderN(list);pvKeep(keepTop);return}
   if(tfActive()){pvRenderT(list);return}
   const q=params()+'&pw='+PW,step=dupOn()?2:1,w=pvSheetW()+'px',n=list.length;
   for(let i=0;i<n;i+=step){
     const row=el('div',{className:'pvrow'});
     list.slice(i,i+step).forEach((p,k)=>{
-      const im=el('img',{alt:'',loading:'lazy',src:`/api/preview?f=${p.f}&p=${p.p}&${q}`});
+      const im=pvImg(`/api/preview?f=${p.f}&p=${p.p}&${q}`);
       const cap=step===2?(k===0?'Front':'Back')+` · page ${i+k+1} of ${n}`:`Page ${i+1} of ${n}`;
       const sh=el('div',{className:'pvsheet'},im,el('small',{className:'mut',textContent:cap}));
       sh.style.width=w;row.append(sh);
     });
     stage.append(row);
   }
+  pvKeep(keepTop);
   pvInfo(q);
 }
+/* ---- preview pictures: right shape from the start, stay in the page, upgraded in place ---- */
+let PVV=0;   // bumped when the printer / paper information is read again (the browser keeps pictures, so they must change address)
+function pvAsp(){   // width / height of the paper on the screen
+  const pp=CAPS&&CAPS.papers?CAPS.papers.find(x=>x.name===$('#paper').value):null;
+  let w=(pp&&pp.w)||210,h=(pp&&pp.h)||297;
+  if((orient()==='landscape')!==(w>h))[w,h]=[h,w];
+  return w/h;
+}
+function pvImg(url){
+  const im=el('img',{alt:'',loading:'lazy'});
+  im.style.aspectRatio=String(pvAsp());
+  im.dataset.t=url.replace(/([?&])pw=\d+/,'$1pw={PW}');   // address with a hole for the picture width
+  im.src=url.replace('{PW}',PW)+'&pv='+PVV;
+  return im;
+}
+function pvKeep(top){if(top)requestAnimationFrame(()=>{$('#pvstage').scrollTop=top})}
+function pvUpgrade(need){   // sharper pictures for the sheets that are already on screen; false = nothing to upgrade in place
+  const imgs=[...document.querySelectorAll('#pvstage .pvsheet img[data-t]')];
+  if(!imgs.length)return false;
+  PW=need;
+  const stage=$('#pvstage').getBoundingClientRect();
+  imgs.forEach(im=>{
+    const url=im.dataset.t.replace('{PW}',PW)+'&pv='+PVV,r=im.getBoundingClientRect();
+    if(r.bottom<stage.top-stage.height||r.top>stage.bottom+stage.height){im.src=url;return}   // far away: just change it, loads when near
+    const pre=new Image();pre.onload=()=>{if(im.isConnected)im.src=url};pre.src=url;       // near: swap when ready, no blank flash
+  });
+  return true;
+}
 /* many pages on one sheet: the preview shows the finished sheets, exactly what Print and Save PDF make */
+const pvCopies=()=>Math.max(1,Math.min(99,parseInt($('#copies').value)||1));
+/* Sheets for "many pages on one sheet" + copies - the SAME rule as nup_plan() in server.py:
+   - the whole job fits on one sheet: the copies fill the sheet (1 page, 2 on a sheet, 2 copies = the page twice;
+     4 copies = 2 sheets with 2 each)
+   - longer job: every copy is a new set of sheets
+   Sheets that look exactly the same are shown ONCE, with a note like "same on 2 sheets". */
+function pvPlan(list,NU,copies){
+  const mk=g=>({g,sig:g.map(p=>p.f+':'+p.p).join(','),from:0,to:0});
+  let sheets=[];
+  if(copies>1&&list.length<=NU){
+    const per=Math.floor(NU/list.length);let left=copies,c=0;
+    while(left>0){const t=Math.min(per,left),g=[];for(let k=0;k<t;k++)g.push(...list);
+      const s=mk(g);s.from=c+1;s.to=c+t;sheets.push(s);c+=t;left-=t}
+  }else{
+    for(let i=0;i<list.length;i+=NU){const s=mk(list.slice(i,i+NU));s.from=i+1;s.to=i+s.g.length;sheets.push(s)}
+  }
+  const out=[];
+  sheets.forEach(s=>{const last=out[out.length-1];
+    if(last&&last.sig===s.sig){last.same++}else{s.same=1;s.idx=out.reduce((t,x)=>t+x.same,0)+1;out.push(s)}});
+  return {out,total:sheets.length,packed:copies>1&&list.length<=NU};
+}
 function pvRenderN(list){
-  const stage=$('#pvstage'),NU=nupN(),sheets=[];
-  for(let i=0;i<list.length;i+=NU)sheets.push(list.slice(i,i+NU));
+  const stage=$('#pvstage'),NU=nupN(),copies=pvCopies();
+  const plan=pvPlan(list,NU,copies),sheets=plan.out;
   const q=params()+'&pw='+PW+'&nup='+NU+`&g0=${list[0].f}:${list[0].p}`;
   const step=dupOn()?2:1,w=pvSheetW()+'px',n=sheets.length;
   for(let i=0;i<n;i+=step){
     const row=el('div',{className:'pvrow'});
-    sheets.slice(i,i+step).forEach((g,k)=>{
-      const s=i+k,a=s*NU+1,b=s*NU+g.length;
-      const im=el('img',{alt:'',loading:'lazy',
-        src:`/api/preview?f=${g[0].f}&p=${g[0].p}&${q}&pg=${g.map(p=>p.f+':'+p.p).join(',')}`});
-      const cap=(step===2?(k===0?'Front':'Back')+' · ':'')+`Sheet ${s+1} of ${n} · page${b>a?'s '+a+'–'+b:' '+a}`;
+    sheets.slice(i,i+step).forEach((S,k)=>{
+      const g=S.g,s=i+k,a=S.from,b=S.to;
+      const im=pvImg(`/api/preview?f=${g[0].f}&p=${g[0].p}&${q}&pg=${S.sig}`);
+      const cn=g.length/list.length,what=plan.packed?`${cn} cop${cn>1?'ies':'y'} on this sheet`
+                            :`page${b>a?'s '+a+'–'+b:' '+a}`;
+      const cap=(step===2?(k===0?'Front':'Back')+' · ':'')+`Sheet ${S.idx}${S.same>1?'–'+(S.idx+S.same-1):''} of ${plan.total} · ${what}`+(S.same>1?` · all ${S.same} sheets look the same`:'');
       const sh=el('div',{className:'pvsheet'},im,el('small',{className:'mut',textContent:cap}));
       sh.style.width=w;row.append(sh);
     });
@@ -1263,6 +1321,7 @@ async function pvInfo(q){
     $('#pvinfo').textContent=(a.driver?'From the printer driver: ':'Estimated (driver gave no area): ')+
       `paper ${a.pw.toFixed(0)} × ${a.ph.toFixed(0)} mm, printable area ${a.aw.toFixed(0)} × ${a.ah.toFixed(0)} mm.`+
       (nupN()>1?` ${nupN()} pages on each sheet.`:'')+
+      (pvCopies()>1&&!(nupN()>1&&selPages().length<=nupN())?` Every page / sheet is printed ${pvCopies()} times.`:'')+
       (dupOn()?' Two-sided: front and back are shown together.':'');
   }catch{$('#pvinfo').textContent=''}
 }
