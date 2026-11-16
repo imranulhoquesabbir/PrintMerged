@@ -244,6 +244,38 @@ def _tunnel_timeout(gen):
             NET.update(state="error", error="Could not get an internet link. Check the internet connection and try again.")
 
 
+CF_URL = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
+
+
+def _cloudflared_fetch(gen):
+    """Downloads cloudflared.exe once (about 35 MB), then starts the internet link."""
+    import urllib.request
+    dest = os.path.join(CFG_DIR, "cloudflared.exe")
+    tmp = dest + ".part"
+    try:
+        os.makedirs(CFG_DIR, exist_ok=True)
+        req = urllib.request.Request(CF_URL, headers={"User-Agent": "PCPrint"})
+        with urllib.request.urlopen(req, timeout=30) as r, open(tmp, "wb") as fh:
+            shutil.copyfileobj(r, fh, 256 * 1024)
+        if os.path.getsize(tmp) < 1_000_000:
+            raise RuntimeError("the downloaded file is too small")
+        os.replace(tmp, dest)
+    except Exception as e:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        with NLOCK:
+            if gen == NET["gen"]:
+                NET.update(on=False, state="error",
+                           error="Could not download the internet-link helper (%s). Check the internet connection and try again." % e)
+        return
+    with NLOCK:
+        if gen != NET["gen"]:        # switched off / restarted while downloading
+            return
+    tunnel_start()
+
+
 def tunnel_start():
     """Start (or restart = brand new link). Returns after the process is launched; the link
     appears a few seconds later (state 'starting' -> 'on')."""
@@ -251,7 +283,11 @@ def tunnel_start():
         _tunnel_kill_locked()
         exe = find_cloudflared()
         if not exe:
-            NET.update(state="error", error="cloudflared.exe was not found. Internet access needs it next to the app (bin/cloudflared.exe).")
+            # not inside the program any more (a 35 MB file that was unpacked on EVERY start made the start slow):
+            # it is downloaded once, the first time the internet link is switched on, and kept in %APPDATA%\PCPrint
+            NET.update(on=True, state="starting")
+            gen = NET["gen"]
+            threading.Thread(target=_cloudflared_fetch, args=(gen,), daemon=True).start()
             return
         NET.update(on=True, state="starting")
         gen = NET["gen"]
@@ -353,10 +389,11 @@ def open_file(path):
         with LOCK:
             d = fitz.open(path)
             n = d.page_count
-            lands = []
+            lands, asps = [], []
             for i in range(n):
                 r = d.load_page(i).rect
                 lands.append(r.width > r.height)
+                asps.append(round(r.width / r.height, 5) if r.height else 0.7071)
             d.close()
         if n < 1:
             raise ValueError("empty PDF")
@@ -369,10 +406,11 @@ def open_file(path):
             if im.getexif().get(274, 1) in (5, 6, 7, 8):
                 w, h = h, w
         kind, n, lands = "img", 1, [w > h]
+        asps = [297 / 210 if w > h else 210 / 297]   # /api/view shows a picture on an A4 sheet
     else:
         raise ValueError("only PDF and image files are supported")
     fid = uuid.uuid4().hex[:10]
-    FILES[fid] = {"id": fid, "name": name, "kind": kind, "pages": n, "lands": lands, "path": path}
+    FILES[fid] = {"id": fid, "name": name, "kind": kind, "pages": n, "lands": lands, "asps": asps, "path": path}
     return fid
 
 
@@ -433,7 +471,7 @@ def register(paths, sort=True):
 
 def pub(f):
     return {"id": f["id"], "name": f["name"], "kind": f["kind"], "pages": f["pages"], "lands": f["lands"],
-            "gone": sorted(GONE.get(f["id"], ()))}
+            "asps": f.get("asps") or [], "gone": sorted(GONE.get(f["id"], ()))}
 
 
 @app.get("/")
@@ -989,6 +1027,25 @@ def nup_groups(pages, n):
     return [pages[i:i + n] for i in range(0, len(pages), n)]
 
 
+def nup_plan(pages, n, copies):
+    """Sheets for 'n pages on one sheet' + copies. Returns (sheets, copies_for_printer).
+    * The whole job fits on ONE sheet (pages <= n): the copies fill the empty spaces of the sheet,
+      e.g. 1 page, 2 on a sheet, 2 copies -> one sheet with the page twice; 1 page, 4 copies -> 2 sheets with 2 each.
+      Copies are already inside the sheets, so the printer gets copies = 1.
+    * The job is longer than one sheet: unchanged, every copy is printed as its own set of sheets.
+    The preview (index.html, pvPlan) uses exactly the same rule."""
+    m = len(pages)
+    if m == 0 or m > n or copies <= 1:
+        return nup_groups(pages, n), copies
+    per = n // m                                   # whole copies of the job that fit on one sheet
+    seq, left = [], copies
+    while left > 0:
+        take = min(per, left)
+        seq.append(list(pages) * take)
+        left -= take
+    return seq, 1
+
+
 # ------------------------------------------------- free layout (Transform)
 def natural_mm(f, idx):
     """Size of the page at its natural (100%) size, in mm."""
@@ -1242,6 +1299,9 @@ def want_hq():
 
 
 def send_img(img, hq=False):
+    """Pictures are cached by the window for a while (the address holds every setting that changes the picture).
+    Before: 'no-store' - every time a picture scrolled out of view and back, or the zoom changed, it was drawn
+    again from scratch by the server, which made the program freeze."""
     b = io.BytesIO()
     if hq:
         img.save(b, "JPEG", quality=95, subsampling=0)   # sharp: near lossless, full colour detail
@@ -1249,7 +1309,7 @@ def send_img(img, hq=False):
         img.save(b, "JPEG", quality=85)                    # fast: small and quick
     b.seek(0)
     r = send_file(b, mimetype="image/jpeg")
-    r.headers["Cache-Control"] = "no-store"
+    r.headers["Cache-Control"] = "private, max-age=600"
     return r
 
 
@@ -1554,8 +1614,10 @@ def do_print():
     orient = "landscape" if d.get("orient") == "landscape" else "portrait"
     jid = uuid.uuid4().hex[:8]
     nup = get_nup(d.get("nup"))
-    sheets = nup_groups([(f, p) for f, p, _ in pages], nup) if nup > 1 else None   # N pages on one sheet
-    JOBS[jid] = {"state": "run", "done": 0, "total": (len(sheets) if sheets else len(pages)) * copies}
+    sheets, pcopies = None, copies
+    if nup > 1:   # N pages on one sheet; copies of a short job fill the sheet (see nup_plan)
+        sheets, pcopies = nup_plan([(f, p) for f, p, _ in pages], nup, copies)
+    JOBS[jid] = {"state": "run", "done": 0, "total": (len(sheets) if sheets else len(pages)) * pcopies}
     color = d.get("color") == "color"
     profile = find_profile(d.get("printer", ""), d.get("profile"))  # None = normal way
     mode = d.get("scale") if d.get("scale") in SCALES else "fit"
@@ -1587,7 +1649,7 @@ def do_print():
                                                     numspec({**nargs, "nn": i + 1} if lay else nargs, pages[i][0]["id"], pages[i][1]),
                                                     items=page_items(i))
             printing.print_job(
-                d["printer"], d.get("paper"), color, d.get("duplex", "off"), orient, copies,
+                d["printer"], d.get("paper"), color, d.get("duplex", "off"), orient, pcopies,
                 len(sheets) if sheets else len(pages), provider,
                 lambda done, total: JOBS[jid].update(done=done, total=total),
                 d.get("title", "PC Print"), profile=profile)

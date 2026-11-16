@@ -70,3 +70,14 @@ SHARP / FAST  (small coloured button in the top bar, next to the zoom buttons)
  - Fast: lighter pictures on screen, quicker to open and scroll. Use it for a big file list, then switch back.
  - It changes the DISPLAY only. Print, Save PDF and your original files are never touched by it. The choice is remembered.
  - Printing now draws each page at the printer's resolution, up to 600 dpi (was 300).
+
+
+START-UP SPEED / PREVIEW (changes)
+ - Start: the exe no longer carries cloudflared.exe (35 MB unpacked on every start). It is downloaded once into
+   %APPDATA%\PCPrint the first time "Internet" is switched on. "Open with" / "Send to" setup runs in the background and
+   only when something is missing; the browser profile is kept in %APPDATA%\PCPrint\webview.
+ - Many pages on one sheet + copies: if the whole job fits on one sheet, copies fill the sheet (1 page, 2 on a sheet,
+   2 copies = the page twice; 4 copies = 2 sheets of 2). Sheets that look the same are shown once in the preview.
+   Print uses exactly the same rule.
+ - Preview: pictures are cached, every page keeps its shape before the picture arrives, zoom swaps sharper pictures
+   in place (no reload of the whole list, scroll position kept).

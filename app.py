@@ -151,15 +151,31 @@ def autostart_set(on):
 def make_send_to():
     """'Send to > PC Print' for many files at once (Windows then starts the app one time)."""
     try:
-        import win32com.client
         folder = os.path.join(os.environ["APPDATA"], "Microsoft", "Windows", "SendTo")
         lnk = os.path.join(folder, "PC Print.lnk")
         if os.path.exists(lnk):
-            return
-        sc = win32com.client.Dispatch("WScript.Shell").CreateShortCut(lnk)
-        sc.TargetPath = sys.executable
-        sc.WorkingDirectory = os.path.dirname(sys.executable)
-        sc.save()
+            try:   # the exe was moved? then make the shortcut again
+                import win32com.client
+                import pythoncom
+                pythoncom.CoInitialize()
+                try:
+                    cur = win32com.client.Dispatch("WScript.Shell").CreateShortCut(lnk).TargetPath
+                finally:
+                    pythoncom.CoUninitialize()
+                if os.path.normcase(cur) == os.path.normcase(sys.executable):
+                    return
+            except Exception:
+                return
+        import win32com.client
+        import pythoncom
+        pythoncom.CoInitialize()
+        try:
+            sc = win32com.client.Dispatch("WScript.Shell").CreateShortCut(lnk)
+            sc.TargetPath = sys.executable
+            sc.WorkingDirectory = os.path.dirname(sys.executable)
+            sc.save()
+        finally:
+            pythoncom.CoUninitialize()
     except Exception:
         pass
 
@@ -169,6 +185,23 @@ def register_open_with():
     import winreg
     exe = sys.executable
     name = os.path.basename(exe)
+    cmd = f'"{exe}" "%1"'
+
+    def open_with_ready():
+        try:
+            base = r"Software\Classes\Applications" + "\\" + name
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, base + r"\shell\open\command") as k:
+                if winreg.QueryValueEx(k, "")[0] != cmd:
+                    return False
+            for ext in EXTS:
+                winreg.CloseKey(winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                               r"Software\Classes" + "\\" + ext + r"\OpenWithList" + "\\" + name))
+            return True
+        except OSError:
+            return False
+
+    if open_with_ready():
+        return          # everything is there already: do not touch the registry or bother Explorer on every start
 
     def setv(path, value_name, value):
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, path) as k:
@@ -184,7 +217,8 @@ def register_open_with():
             pass
     try:
         import ctypes
-        ctypes.windll.shell32.SHChangeNotify(0x08000000, 0, None, None)
+        # SHCNF_FLUSHNOWAIT: do not wait for Explorer (waiting for it could freeze the start for seconds)
+        ctypes.windll.shell32.SHChangeNotify(0x08000000, 0x3000, None, None)
     except Exception:
         pass
 
@@ -262,11 +296,14 @@ def main():
     server.HOOKS["rebind"] = bind
 
     if getattr(sys, "frozen", False):
-        try:
-            register_open_with()
-        except Exception:
-            pass
-        make_send_to()
+        # registry + 'Send to' shortcut are not needed to show the window: do them in the background
+        def shell_setup():
+            try:
+                register_open_with()
+            except Exception:
+                pass
+            make_send_to()
+        threading.Thread(target=shell_setup, daemon=True).start()
     if paths:
         server.register(paths, sort=True)
 
@@ -309,7 +346,11 @@ def main():
         server.HOOKS["autostart_get"] = autostart_get
         server.HOOKS["autostart_set"] = autostart_set
     updatemgr.start()      # auto update: looks for a new build a few seconds after start (if switched on)
-    webview.start()
+    try:
+        # same profile every start: the window opens faster than with a new temporary one each time
+        webview.start(private_mode=False, storage_path=os.path.join(server.CFG_DIR, "webview"))
+    except TypeError:      # an old pywebview without these options
+        webview.start()
     if tray:
         try:
             tray.stop()
