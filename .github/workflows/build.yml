@@ -37,19 +37,18 @@ jobs:
       - name: Updater test
         run: python test_updater.py
 
-      - name: Download cloudflared (internet link)
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force bin | Out-Null
-          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile bin\cloudflared.exe
+      # cloudflared.exe is NOT packed into the exe any more: a onefile exe unpacks everything to a temp folder on every
+      # start, and a 35 MB helper made the start slow (and the antivirus scanned it every time). The program
+      # downloads it once, when the internet link is switched on for the first time.
 
       - name: Build exe
         run: >
           pyinstaller --noconsole --onefile --name PCPrint
           --add-data "static;static"
-          --add-binary "bin\cloudflared.exe;bin"
+          --exclude-module tkinter
           --hidden-import pystray._win32
           --hidden-import win32com.client
+          --hidden-import pythoncom
           --hidden-import buildinfo
           --collect-all webview
           --collect-all pythonnet
