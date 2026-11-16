@@ -2,7 +2,7 @@ PrintMerged = PC Print + Phone Print (one program)
 Made by Imranul Hoque Sabbir.
 
 Run:    pip install -r requirements.txt   then   python app.py
-Build:  pyinstaller --noconsole --onefile --add-data "static;static" app.py
+Build:  pyinstaller --noconsole --onedir --add-data "static;static" app.py     (a program FOLDER: PCPrint.exe + _internal)
         (use --icon / --name as you did before)
 
 PC window  : your PC Print screen + a "Phone" button (QR, PIN on/off, PIN, port).
@@ -20,15 +20,15 @@ Other apps / Share:  the old Phone Print API is kept, so your other app can conn
 AUTO UPDATE  (top bar > Updates)
  - ON (default): a few seconds after start, and every 6 hours while the program is open, it looks on GitHub for a newer build.
    When there is one you get a Windows tray message and a question "Update now / Later" in the window. Only after
-   "Update now" it downloads the new PCPrint.exe, closes, swaps the file and starts again.
+   "Update now" it downloads the new program folder, closes, copies the files over the old ones and starts again.
    Settings, printer profiles and the phone PIN are kept (they live in %APPDATA%\PCPrint). The file list is NOT saved,
    so it is empty after an update. It never updates while a print job is running.
  - OFF: it never looks and never shows anything about updates. ("Check for updates now" still works when you click it.)
  - Only the PC window can use it: the phone page cannot start an update.
  - How it works: every build that finishes on the main branch is published as a GitHub Release  build-<number>
-   (file PCPrint-windows.zip). The build writes its own number and your repository name into the program (buildinfo.py),
+   (file PCPrint-folder-windows.zip = the whole program folder). The build writes its own number and your repository name into the program (buildinfo.py),
    so nothing needs to be set up. (Old v* tag releases are no longer made: the updater only reads build-<number> releases.)
- - Needs: a PUBLIC repository (a private one cannot be read by the program without a login), and PCPrint.exe must be in a
+ - Needs: a PUBLIC repository (a private one cannot be read by the program without a login), and the program folder (PCPrint.exe + _internal, keep them together) must be in a
    writable folder (C:\Tools\PCPrint is fine, C:\Program Files is not). Details of a failed update: %APPDATA%\PCPrint\update.log
  - Repository Settings > Actions > General > Workflow permissions must allow "Read and write permissions".
  - Test the update logic: python test_updater.py
@@ -73,9 +73,15 @@ SHARP / FAST  (small coloured button in the top bar, next to the zoom buttons)
 
 
 START-UP SPEED / PREVIEW (changes)
- - Start: the exe no longer carries cloudflared.exe (35 MB unpacked on every start). It is downloaded once into
-   %APPDATA%\PCPrint the first time "Internet" is switched on. "Open with" / "Send to" setup runs in the background and
-   only when something is missing; the browser profile is kept in %APPDATA%\PCPrint\webview.
+ - FOLDER BUILD: the program is a folder now (PCPrint.exe + _internal), not one exe that unpacked itself into a temp folder
+   on every start. It starts much faster and a second start (Image Fixer Ctrl+P, Open with, Send to) is light.
+   * FIRST TIME: copies of the old single-exe program do NOT update to this build by themselves (that is on purpose: copying
+     only the exe would break them). Download PCPrint-folder-windows.zip from the Release page once, unzip it to a folder such as
+     C:\Tools\PCPrint, start PCPrint.exe from there (the old PCPrint.exe can be deleted). Auto update works from then on.
+   * Never move PCPrint.exe alone: it needs the _internal folder beside it. Make shortcuts, do not copy the exe.
+   * A second start only hands its files to the open window (no heavy libraries are loaded) and the window comes to the front.
+ - "Open with" / "Send to" setup runs in the background and only when something is missing; the browser profile is kept in
+   %APPDATA%\PCPrint\webview.
  - Many pages on one sheet + copies: if the whole job fits on one sheet, copies fill the sheet (1 page, 2 on a sheet,
    2 copies = the page twice; 4 copies = 2 sheets of 2). Sheets that look the same are shown once in the preview.
    Print uses exactly the same rule.

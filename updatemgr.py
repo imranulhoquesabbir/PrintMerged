@@ -128,7 +128,7 @@ def _install(info):
         S["done"], S["total"] = done, total
 
     try:
-        new_exe = updater.download_and_stage(info, progress, CANCEL.is_set)
+        staged = updater.download_and_stage(info, progress, CANCEL.is_set)
     except Exception as e:
         text = str(e)
         updater.log("update failed: " + text)
@@ -150,7 +150,7 @@ def _install(info):
     with LOCK:
         S["state"] = "ready"
     try:
-        updater.launch_installer(new_exe)
+        updater.launch_installer(staged)
     except Exception as e:
         updater.log("could not start the installer: %s" % e)
         updater.discard()

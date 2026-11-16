@@ -491,12 +491,9 @@ def ping():
 def add():
     d = request.get_json(silent=True) or {}
     paths = [str(p) for p in d.get("paths", [])]
+    if HOOKS["front"]:      # the window comes up at once (in its own thread); opening a big PDF below can take a while
+        threading.Thread(target=lambda: HOOKS["front"](), daemon=True).start()
     added, errors = register(paths, sort=True)
-    if HOOKS["front"]:
-        try:
-            HOOKS["front"]()
-        except Exception:
-            pass
     return jsonify(added=added, errors=errors)
 
 

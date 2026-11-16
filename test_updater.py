@@ -10,7 +10,7 @@ import zipfile
 import updater
 
 REPO = "me/PrintMerged"
-URL = "https://github.com/%s/releases/download/build-12/PCPrint-windows.zip" % REPO
+URL = "https://github.com/%s/releases/download/build-12/PCPrint-folder-windows.zip" % REPO
 
 
 def rel(tag="build-12", **kw):
@@ -45,12 +45,13 @@ def main():
     r = updater.parse_release(rel(assets=[{"name": updater.ASSET, "browser_download_url": URL, "digest": "sha256:" + sha.upper()}]), REPO, 1)
     assert r["sha256"] == sha
 
-    # --- stage
+    # --- stage (folder build: PCPrint.exe + _internal)
     d = tempfile.mkdtemp()
-    make_zip(os.path.join(d, "a.zip"), ["PCPrint.exe"])
-    assert updater.stage(os.path.join(d, "a.zip"), os.path.join(d, "sa")) == os.path.join(d, "sa", "PCPrint.exe")
-    make_zip(os.path.join(d, "b.zip"), ["PCPrint/PCPrint.exe"])
-    assert updater.stage(os.path.join(d, "b.zip"), os.path.join(d, "sb")) == os.path.join(d, "sb", "PCPrint", "PCPrint.exe")
+    make_zip(os.path.join(d, "a.zip"), ["PCPrint.exe", "_internal/base.dll"])
+    assert updater.stage(os.path.join(d, "a.zip"), os.path.join(d, "sa")) == os.path.join(d, "sa")
+    assert os.path.isfile(os.path.join(d, "sa", "_internal", "base.dll"))
+    make_zip(os.path.join(d, "b.zip"), ["PCPrint/PCPrint.exe", "PCPrint/_internal/base.dll"])
+    assert updater.stage(os.path.join(d, "b.zip"), os.path.join(d, "sb")) == os.path.join(d, "sb", "PCPrint")
     make_zip(os.path.join(d, "c.zip"), ["other.txt"])
     for z, why in (("c.zip", "no exe"),):
         try:
@@ -124,15 +125,20 @@ def main():
 
     # --- whole step
     updater.WORK_DIR = os.path.join(d, "work")
-    new_exe = updater.download_and_stage({"url": base + "/f.zip", "size": len(payload), "sha256": ok_sha})
-    assert os.path.isfile(new_exe) and new_exe.endswith("PCPrint.exe")
+    root = updater.download_and_stage({"url": base + "/f.zip", "size": len(payload), "sha256": ok_sha})
+    assert os.path.isfile(os.path.join(root, "PCPrint.exe")) and os.path.isfile(os.path.join(root, "_internal", "base.dll"))
+
+    # --- the old single-exe release name is NOT accepted (old installs must not copy only the exe)
+    assert updater.ASSET != "PCPrint-windows.zip"
+    old = rel(assets=[{"name": "PCPrint-windows.zip", "browser_download_url": URL}])
+    assert updater.parse_release(old, REPO, 1) is None
 
     # --- installer script (text only; it runs on Windows)
-    bat = updater.installer_script(r"C:\Temp\new\PCPrint.exe", r"C:\Tools\Print 100%\PCPrint.exe", 4321)
+    bat = updater.installer_script(r"C:\Temp\new", r"C:\Tools\Print 100%", r"C:\Tools\Print 100%\PCPrint.exe", 4321)
     assert 'PID eq 4321' in bat and 'IMAGENAME eq PCPrint.exe' in bat
-    assert 'copy /Y "C:\\Temp\\new\\PCPrint.exe" "C:\\Tools\\Print 100%%\\PCPrint.exe"' in bat
+    assert 'robocopy "C:\\Temp\\new" "C:\\Tools\\Print 100%%" /E' in bat
     assert 'start "" "C:\\Tools\\Print 100%%\\PCPrint.exe"' in bat and "\r\n" in bat
-    assert "if %n% GTR 60 goto failed" in bat
+    assert "if errorlevel 8 goto failed" in bat
     print("updater tests: all passed")
 
 

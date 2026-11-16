@@ -3,7 +3,7 @@ No web / window code in here (so it can be tested alone). The routes are in serv
 
 How it works
   * The GitHub build (build.yml) publishes every finished build as a Release called  build-<number>  with the file
-    PCPrint-windows.zip (it holds PCPrint.exe), and writes the number + repository into buildinfo.py before packing.
+    PCPrint-folder-windows.zip (the whole program folder: PCPrint.exe + _internal), and writes the number + repository into buildinfo.py before packing.
   * The program asks   https://api.github.com/repos/<repo>/releases/latest   and compares the number with its own.
   * Install = download the zip, unpack it in the temp folder, close the program, a small .bat waits until the old
     PCPrint.exe is gone, copies the new one over it and starts it again.
@@ -30,7 +30,10 @@ except Exception:
     BUILD, REPO = 0, ""
 
 API_BASE = "https://api.github.com"
-ASSET = "PCPrint-windows.zip"
+# The program is a FOLDER build now (PyInstaller --onedir): it starts much faster than the old single exe, which unpacked itself
+# into a temp folder on every start. The release file has a NEW name on purpose: old single-exe installs look for
+# "PCPrint-windows.zip", do not find it and simply stay as they are (they would break if they copied only the exe).
+ASSET = "PCPrint-folder-windows.zip"
 EXE_NAME = "PCPrint.exe"
 TAG_RE = re.compile(r"^build-(\d+)$")
 WORK_DIR = os.path.join(tempfile.gettempdir(), "PCPrintUpdate")
@@ -145,7 +148,7 @@ def download(url, dest, size=0, sha256="", progress=None, cancelled=None):
 
 
 def stage(zip_path, stage_dir):
-    """Unpacks the zip into stage_dir and returns the full path of the new PCPrint.exe."""
+    """Unpacks the zip into stage_dir and returns the folder that holds PCPrint.exe (and its _internal folder)."""
     try:
         with zipfile.ZipFile(zip_path) as z:
             if z.testzip() is not None:
@@ -153,24 +156,23 @@ def stage(zip_path, stage_dir):
             z.extractall(stage_dir)                # zipfile drops '..' and absolute parts itself
     except zipfile.BadZipFile:
         raise UpdateError("The downloaded file is not a valid zip.")
-    direct = os.path.join(stage_dir, EXE_NAME)
-    if os.path.isfile(direct):
-        return direct
+    if os.path.isfile(os.path.join(stage_dir, EXE_NAME)):
+        return stage_dir
     for name in os.listdir(stage_dir):
-        sub = os.path.join(stage_dir, name, EXE_NAME)
-        if os.path.isfile(sub):
+        sub = os.path.join(stage_dir, name)
+        if os.path.isfile(os.path.join(sub, EXE_NAME)):
             return sub
     raise UpdateError("The update does not contain %s." % EXE_NAME)
 
 
 def download_and_stage(info, progress=None, cancelled=None):
-    """Whole download step. Returns the path of the new exe (ready to be copied over the running one)."""
+    """Whole download step. Returns the staged folder (ready to be copied over the program folder)."""
     shutil.rmtree(WORK_DIR, ignore_errors=True)
     os.makedirs(WORK_DIR, exist_ok=True)
     zip_path = os.path.join(WORK_DIR, ASSET)
     try:
         download(info["url"], zip_path, info.get("size", 0), info.get("sha256", ""), progress, cancelled)
-        new_exe = stage(zip_path, os.path.join(WORK_DIR, "new"))
+        root = stage(zip_path, os.path.join(WORK_DIR, "new"))
     except Exception:
         shutil.rmtree(WORK_DIR, ignore_errors=True)
         raise
@@ -178,7 +180,7 @@ def download_and_stage(info, progress=None, cancelled=None):
         os.remove(zip_path)
     except OSError:
         pass
-    return new_exe
+    return root
 
 
 def discard():
@@ -190,11 +192,10 @@ def _bat_quote(path):
     return path.replace("%", "%%")
 
 
-def installer_script(new_exe, target_exe, pid):
-    """Text of the .bat. It waits for the old program to close, copies the new exe over it (retrying while Windows
-    still holds the file), then starts it. The one-file exe has a small launcher process that closes a moment after
-    the program itself, so the copy is retried for up to ~60 seconds."""
-    exe_name = ntpath.basename(target_exe)
+def installer_script(stage_root, target_dir, exe_path, pid):
+    """Text of the .bat. It waits for the old program to close, copies ALL new files over the program folder (robocopy
+    retries a file that Windows still holds), then starts the program again. Settings live in %APPDATA%, so they stay."""
+    exe_name = ntpath.basename(exe_path)
     q = _bat_quote
     return "\r\n".join([
         "@echo off",
@@ -210,21 +211,14 @@ def installer_script(new_exe, target_exe, pid):
         "timeout /t 1 /nobreak >NUL",
         "goto wait",
         ":copy",
-        "set n=0",
-        ":again",
-        'copy /Y "%s" "%s" >NUL 2>&1' % (q(new_exe), q(target_exe)),
-        "if not errorlevel 1 goto copied",
-        "set /a n+=1",
-        "if %n% GTR 60 goto failed",
-        "timeout /t 1 /nobreak >NUL",
-        "goto again",
-        ":copied",
-        'echo %date% %time%  installer: new program copied >> "%LOG%"',
+        'robocopy "%s" "%s" /E /R:10 /W:1 /NFL /NDL /NJH /NJS /NP >> "%%LOG%%" 2>&1' % (q(stage_root), q(target_dir)),
+        "if errorlevel 8 goto failed",
+        'echo %date% %time%  installer: files copied >> "%LOG%"',
         "goto start",
         ":failed",
         'echo %date% %time%  installer: COPY FAILED (is the folder writable?) >> "%LOG%"',
         ":start",
-        'start "" "%s"' % q(target_exe),
+        'start "" "%s"' % q(exe_path),
         'rd /s /q "%s"' % q(WORK_DIR),
         "exit /b 0",
         ":stuck",
@@ -234,16 +228,14 @@ def installer_script(new_exe, target_exe, pid):
     ])
 
 
-def launch_installer(new_exe):
+def launch_installer(stage_root):
     """Starts the copy script and returns. The program must exit right after this."""
+    exe = exe_path()
     bat = os.path.join(WORK_DIR, "install.bat")
     with open(bat, "w", encoding="utf-8", newline="") as f:
-        f.write(installer_script(new_exe, exe_path(), os.getpid()))
-    env = dict(os.environ)
-    env.pop("_MEIPASS2", None)
-    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"      # the new one-file exe must unpack itself fresh, not reuse our temp folder
+        f.write(installer_script(stage_root, install_dir(), exe, os.getpid()))
     flags = 0x08000000 | 0x00000200      # hidden console + own process group (NOT detached: a detached script opens a window for every command it runs)
-    subprocess.Popen(["cmd", "/c", bat], creationflags=flags, close_fds=True, env=env,
+    subprocess.Popen(["cmd", "/c", bat], creationflags=flags, close_fds=True,
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     log("update installer launched")
 

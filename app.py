@@ -4,9 +4,11 @@ if sys.stderr is None: sys.stderr = open(os.devnull, "w")
 import logging
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
-from werkzeug.serving import make_server
-import server
-import updatemgr
+# NOTE: server (flask, fitz, PIL, printer libraries) and updatemgr are imported inside main(), AFTER we know that this
+# is the first window. Every later start (Image Fixer Ctrl+P, 'Open with', 'Send to') only hands its files to the open window
+# and quits: before, it loaded all the heavy libraries first, which made the PC hang and the window appear late.
+make_server = server = updatemgr = None
+CFG_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "PCPrint")   # same folder as server.CFG_DIR
 
 MUTEX = None   # keeps the "one window only" lock alive
 EXTS = (".pdf", ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff")
@@ -28,6 +30,37 @@ def tray_image():
     return img
 
 
+def native_front():
+    """Windows does not let a program that runs in the background take the front: the window only blinks in the task bar
+    ("it just runs in the background"). The tap on ALT lifts that rule for this moment (same trick as printing.py)."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        u = ctypes.windll.user32
+        pid = os.getpid()
+        found = []
+
+        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        def each(hwnd, _):
+            p = wintypes.DWORD()
+            u.GetWindowThreadProcessId(hwnd, ctypes.byref(p))
+            if p.value == pid:
+                buf = ctypes.create_unicode_buffer(64)
+                u.GetWindowTextW(hwnd, buf, 64)
+                if buf.value == "PC Print":
+                    found.append(hwnd)
+            return True
+        u.EnumWindows(each, 0)
+        for hwnd in found:
+            u.ShowWindow(hwnd, 9 if u.IsIconic(hwnd) else 5)     # SW_RESTORE / SW_SHOW
+            u.keybd_event(0x12, 0, 0, 0)                         # ALT down / up
+            u.keybd_event(0x12, 0, 2, 0)
+            u.BringWindowToTop(hwnd)
+            u.SetForegroundWindow(hwnd)
+    except Exception:
+        pass
+
+
 def front():
     """Show the window (also when it is hidden in the tray) and bring it to the front."""
     try:
@@ -37,6 +70,7 @@ def front():
         win.on_top = False
     except Exception:
         pass
+    native_front()
 
 
 def quit_app(*a):
@@ -77,7 +111,7 @@ def argv_paths():
 
 
 def port_file():
-    return os.path.join(server.CFG_DIR, "port.txt")
+    return os.path.join(CFG_DIR, "port.txt")
 
 
 def is_primary():
@@ -103,8 +137,18 @@ def ping(port):
         return False
 
 
+def allow_foreground():
+    """This (new) process was just started by the user's click, so Windows lets it hand the front to the open window."""
+    try:
+        import ctypes
+        ctypes.windll.user32.AllowSetForegroundWindow(-1)        # ASFW_ANY
+    except Exception:
+        pass
+
+
 def forward(paths):
     """Send files to the window that is already open (waits until it is ready)."""
+    allow_foreground()
     for _ in range(60):
         try:
             with open(port_file()) as fh:
@@ -291,6 +335,11 @@ def main():
         if not startup:
             forward(paths)
         return
+
+    global make_server, server, updatemgr
+    from werkzeug.serving import make_server
+    import server
+    import updatemgr
 
     port = bind(server.ph_cfg()["port"])
     server.HOOKS["rebind"] = bind
