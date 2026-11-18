@@ -7,6 +7,7 @@ Build:  pyinstaller --noconsole --onedir --add-data "static;static" app.py     (
 
 PC window  : your PC Print screen + a "Phone" button (QR, PIN on/off, PIN, port).
 Phone      : scan the QR -> touch page (static/phone.html). Same server, same file list, same settings.
+Same Wi-Fi: with the phone PIN switch OFF anybody on the same Wi-Fi can print and delete files in the list. Switch the PIN ON to stop that.
 Windows firewall asks once: Allow on Private networks, or the phone cannot connect.
 Saved always: page numbers, printer options, phone PIN/port, printer profiles (in %APPDATA%\PCPrint).
 Never saved : file list and uploaded files (gone when you quit).
@@ -18,7 +19,7 @@ Other apps / Share:  the old Phone Print API is kept, so your other app can conn
   Files with no extension / odd names are recognised by their content (PDF or picture).
 
 AUTO UPDATE  (top bar > Updates)
- - ON (default): a few seconds after start, and every 6 hours while the program is open, it looks on GitHub for a newer build.
+ - ON (default): a few seconds after start, and every 30 minutes while the program is open, it looks on GitHub for a newer build.
    When there is one you get a Windows tray message and a question "Update now / Later" in the window. Only after
    "Update now" it downloads the new program folder, closes, copies the files over the old ones and starts again.
    Settings, printer profiles and the phone PIN are kept (they live in %APPDATA%\PCPrint). The file list is NOT saved,

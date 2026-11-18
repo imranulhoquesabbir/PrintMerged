@@ -1,5 +1,5 @@
 import os, sys, io, re, math, hmac, socket, uuid, time, json, shutil, tempfile, threading, functools
-import subprocess, atexit, hashlib, secrets, collections
+import subprocess, atexit, hashlib, secrets, collections, ipaddress, contextlib
 from flask import Flask, request, jsonify, send_file, session
 import fitz
 from PIL import Image, ImageOps, ImageDraw, ImageFont, ImageGrab
@@ -58,6 +58,7 @@ def cleanup():
         shutil.rmtree(_UP["dir"], ignore_errors=True)
 
 
+SETTING_KEYS = ("hq", "prn", "num")   # the only settings the two pages save
 LOCAL = ("127.0.0.1", "::1")
 PH = {"ok": False, "port": 0, "fails": 0, "until": 0}
 PH_FILE = os.path.join(CFG_DIR, "phone.json")
@@ -115,6 +116,20 @@ def origin():
     return "lan"
 
 
+def host_ok():
+    """Only an IP address (this PC, or the LAN address the phone scanned), 'localhost' or the internet-link name
+    is a valid Host. A malicious web page reaches this PC under ITS OWN domain name, so any other name is refused."""
+    raw = (request.host or "").strip().lower()
+    host = raw[1:raw.index("]")] if raw.startswith("[") and "]" in raw else raw.rsplit(":", 1)[0] if raw.count(":") == 1 else raw
+    if host == "localhost" or host.endswith(".trycloudflare.com"):
+        return True
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
 def mode_pw(o, c=None):
     c = c or ph_cfg()
     return (c["net_pw_on"], c["net_pin"]) if o == "net" else (c["pw_on"], c["pin"])
@@ -129,6 +144,8 @@ def tok(pin):
 def guard():
     """This PC's own window: full access. Phones (Wi-Fi or internet link): phone page + print API only
     (PIN if it is on for that way of connecting). Anything that touches this PC's disk/clipboard is PC-only."""
+    if not host_ok():
+        return "bad host", 403          # DNS rebinding: a web page cannot reach this program under its own domain name
     o = origin()
     if o == "pc":
         return
@@ -247,6 +264,27 @@ def _tunnel_timeout(gen):
 CF_URL = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
 
 
+CF_API = "https://api.github.com/repos/cloudflare/cloudflared/releases/latest"
+CF_ASSET = "cloudflared-windows-amd64.exe"
+
+
+def _cloudflared_sha256():
+    """The official SHA-256 of the file: from the release asset itself, or from the release notes. No checksum = no install."""
+    import urllib.request
+    req = urllib.request.Request(CF_API, headers={"User-Agent": "PCPrint", "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        rel = json.loads(r.read().decode("utf-8", "replace"))
+    for a in rel.get("assets") or []:
+        if a.get("name") == CF_ASSET:
+            dg = str(a.get("digest") or "")
+            if dg.startswith("sha256:") and re.fullmatch(r"[0-9a-f]{64}", dg[7:]):
+                return dg[7:]
+    m = re.search(re.escape(CF_ASSET) + r"\W{1,6}([0-9a-fA-F]{64})", rel.get("body") or "")
+    if m:
+        return m.group(1).lower()
+    raise RuntimeError("no official checksum found")
+
+
 def _cloudflared_fetch(gen):
     """Downloads cloudflared.exe once (about 35 MB), then starts the internet link."""
     import urllib.request
@@ -254,11 +292,20 @@ def _cloudflared_fetch(gen):
     tmp = dest + ".part"
     try:
         os.makedirs(CFG_DIR, exist_ok=True)
+        want = _cloudflared_sha256()
         req = urllib.request.Request(CF_URL, headers={"User-Agent": "PCPrint"})
+        h = hashlib.sha256()
         with urllib.request.urlopen(req, timeout=30) as r, open(tmp, "wb") as fh:
-            shutil.copyfileobj(r, fh, 256 * 1024)
+            while True:
+                chunk = r.read(256 * 1024)
+                if not chunk:
+                    break
+                h.update(chunk)
+                fh.write(chunk)
         if os.path.getsize(tmp) < 1_000_000:
             raise RuntimeError("the downloaded file is too small")
+        if h.hexdigest() != want:
+            raise RuntimeError("the downloaded file does not match its checksum")
         os.replace(tmp, dest)
     except Exception as e:
         try:
@@ -382,19 +429,71 @@ def natural(name):
     return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", name.lower())]
 
 
+# ---- open PDF handles: kept for a short time (opening a big PDF for EVERY page was slow), closed again when idle,
+#      so a PDF is never locked on disk for long. Used only with LOCK held (fitz is not thread safe).
+_DOCS = collections.OrderedDict()   # (path, mtime) -> [document, last use]
+DOC_IDLE = 15.0
+DOC_MAX = 6
+
+
+def _docs_close(match=None, idle=None):
+    """Close cached documents (call with LOCK held): all, those of one path, or those unused for `idle` seconds."""
+    now = time.time()
+    for k in list(_DOCS):
+        if (match is None or k[0] == match) and (idle is None or now - _DOCS[k][1] > idle):
+            try:
+                _DOCS.pop(k)[0].close()
+            except Exception:
+                pass
+
+
+@contextlib.contextmanager
+def pdf_doc(path):
+    with LOCK:
+        try:
+            key = (path, os.stat(path).st_mtime_ns)
+        except OSError:
+            key = (path, 0)
+        _docs_close(match=path) if any(k[0] == path and k != key for k in _DOCS) else None   # file changed on disk
+        ent = _DOCS.pop(key, None)
+        if ent is None:
+            ent = [fitz.open(path), 0]
+        ent[1] = time.time()
+        _DOCS[key] = ent
+        while len(_DOCS) > DOC_MAX:
+            _, old = _DOCS.popitem(last=False)
+            try:
+                old[0].close()
+            except Exception:
+                pass
+        yield ent[0]
+        ent[1] = time.time()
+
+
+def _doc_reaper():
+    while True:
+        time.sleep(5)
+        if LOCK.acquire(timeout=1):
+            try:
+                _docs_close(idle=DOC_IDLE)
+            finally:
+                LOCK.release()
+
+
+threading.Thread(target=_doc_reaper, daemon=True).start()
+
+
 def open_file(path):
     ext = os.path.splitext(path)[1].lower()
     name = os.path.basename(path)
     if ext == ".pdf":
-        with LOCK:
-            d = fitz.open(path)
+        with pdf_doc(path) as d:
             n = d.page_count
             lands, asps = [], []
             for i in range(n):
                 r = d.load_page(i).rect
                 lands.append(r.width > r.height)
                 asps.append(round(r.width / r.height, 5) if r.height else 0.7071)
-            d.close()
         if n < 1:
             raise ValueError("empty PDF")
         kind = "pdf"
@@ -693,17 +792,81 @@ def autostart_set():
 
 @app.get("/api/state")
 def state():
+    """The window asks every second. When it sends the revision it already has (?rev=&srev=) and nothing changed,
+    a tiny answer is sent instead of the whole file list. Only this PC's window takes the notice (a phone used to
+    swallow the 'bad file' message meant for the PC)."""
+    pc = origin() == "pc"
     with SLOCK:
-        notice, NOTICE["t"] = NOTICE["t"], ""
+        notice = ""
+        if pc and NOTICE["t"]:
+            notice, NOTICE["t"] = NOTICE["t"], ""
+        if not notice and request.args.get("rev") == str(REV["n"]) and request.args.get("srev") == str(SREV["n"]):
+            return jsonify(rev=REV["n"], srev=SREV["n"], same=True)
         return jsonify(rev=REV["n"], srev=SREV["n"], notice=notice, files=[pub(FILES[i]) for i in ORDER if i in FILES])
+
+
+def drop_file(fid):
+    """Forget a file (call with SLOCK held). A copy that this program made in its temp folder (dropped / pasted /
+    phone upload) is deleted from the disk too, as soon as no print / save job is running. Files the user picked
+    from their own folders are never touched."""
+    GONE.pop(fid, None)
+    f = FILES.pop(fid, None)
+    if fid in ORDER:
+        ORDER.remove(fid)
+    if not f or not _UP["dir"]:
+        return
+    path = os.path.abspath(f["path"])
+    root = os.path.abspath(_UP["dir"])
+    if os.path.dirname(os.path.dirname(path)) == root:      # <temp folder>/<random folder>/<file>
+        _TRASH.append(path)
+        threading.Thread(target=sweep_trash, daemon=True).start()   # LOCK may be busy drawing: never wait for it here
+
+
+_TRASH = []
+
+
+def sweep_trash():
+    if not _TRASH or any(j.get("state") == "run" for j in list(JOBS.values())):
+        return
+    if not LOCK.acquire(timeout=30):
+        return
+    try:
+        while _TRASH:
+            path = _TRASH.pop()
+            _docs_close(match=path)      # an open handle would block the delete on Windows
+            try:
+                os.remove(path)
+                os.rmdir(os.path.dirname(path))        # its own little folder
+            except OSError:
+                pass
+    finally:
+        LOCK.release()
+
+
+def new_job(job):
+    """Register a print / save job. Finished jobs older than 10 minutes are forgotten (the list never grew smaller before)."""
+    now = time.time()
+    for k in [k for k, j in list(JOBS.items()) if j.get("state") != "run" and now - j.get("t", now) > 600]:
+        JOBS.pop(k, None)
+    sweep_trash()
+    jid = uuid.uuid4().hex[:8]
+    job["t"] = now
+    JOBS[jid] = job
+    return jid
+
+
+def job_end(jid, **kw):
+    """Mark a job finished (done / error) and let a waiting temp-file delete go ahead."""
+    JOBS[jid].update(kw)
+    JOBS[jid]["t"] = time.time()
+    sweep_trash()
 
 
 @app.delete("/api/files/<fid>")
 def del_one(fid):
     with SLOCK:
-        GONE.pop(fid, None)
-        if FILES.pop(fid, None) is not None and fid in ORDER:
-            ORDER.remove(fid)
+        if fid in FILES:
+            drop_file(fid)
             bump()
     return jsonify(ok=True)
 
@@ -724,10 +887,7 @@ def pages_remove():
         g = GONE.setdefault(fid, set())
         g.add(p)
         if len(g) >= f["pages"]:
-            GONE.pop(fid, None)
-            FILES.pop(fid, None)
-            if fid in ORDER:
-                ORDER.remove(fid)
+            drop_file(fid)
         bump()
     return jsonify(ok=True)
 
@@ -735,7 +895,8 @@ def pages_remove():
 @app.delete("/api/files")
 def del_all():
     with SLOCK:
-        FILES.clear()
+        for fid in list(FILES):
+            drop_file(fid)
         ORDER.clear()
         GONE.clear()
         bump()
@@ -768,7 +929,10 @@ def settings_get():
 
 @app.post("/api/settings")
 def settings_set():
-    d = request.get_json(silent=True) or {}
+    d = request.get_json(silent=True)
+    if not isinstance(d, dict):
+        return jsonify(error="bad settings"), 400
+    d = {k: v for k, v in d.items() if k in SETTING_KEYS}   # only the keys the two pages really use
     try:
         os.makedirs(CFG_DIR, exist_ok=True)
         try:
@@ -877,6 +1041,16 @@ def get_pct(v):
         return 100.0
 
 
+def flatten(img):
+    """Any picture -> plain RGB (transparent parts become white)."""
+    if img.mode in ("RGBA", "LA", "P"):
+        img = img.convert("RGBA")
+        bg = Image.new("RGB", img.size, "white")
+        bg.paste(img, mask=img.split()[3])
+        return bg
+    return img.convert("RGB")
+
+
 def compose(f, idx, W, H, mono, rotate=True, mode="fit", ppmm=None, pct=100.0):
     """Draw one page on a white sheet of W x H pixels.
     mode "fit":    whole page fitted inside the area, nothing cut off
@@ -895,19 +1069,15 @@ def compose(f, idx, W, H, mono, rotate=True, mode="fit", ppmm=None, pct=100.0):
         return min(s, 8000.0 / max(fw, fh))  # safety cap for huge pages
 
     if f["kind"] == "pdf":
-        with LOCK:
-            doc = fitz.open(f["path"])
-            try:
-                pg = doc[idx]
-                pw, ph = pg.rect.width, pg.rect.height
-                rot = rotate and ((pw > ph) != (W > H))
-                fw, fh = (ph, pw) if rot else (pw, ph)
-                s = pick(fw, fh, 25.4 / 72)
-                pix = pg.get_pixmap(matrix=fitz.Matrix(s, s),
-                                    colorspace=fitz.csGRAY if mono else fitz.csRGB, alpha=False)
-                img = Image.frombytes("L" if mono else "RGB", (pix.width, pix.height), pix.samples)
-            finally:
-                doc.close()
+        with pdf_doc(f["path"]) as doc:
+            pg = doc[idx]
+            pw, ph = pg.rect.width, pg.rect.height
+            rot = rotate and ((pw > ph) != (W > H))
+            fw, fh = (ph, pw) if rot else (pw, ph)
+            s = pick(fw, fh, 25.4 / 72)
+            pix = pg.get_pixmap(matrix=fitz.Matrix(s, s),
+                                colorspace=fitz.csGRAY if mono else fitz.csRGB, alpha=False)
+            img = Image.frombytes("L" if mono else "RGB", (pix.width, pix.height), pix.samples)
     else:
         img = Image.open(f["path"])
         try:
@@ -916,14 +1086,9 @@ def compose(f, idx, W, H, mono, rotate=True, mode="fit", ppmm=None, pct=100.0):
             dpi = 300.0
         if dpi < 1:
             dpi = 300.0
-        img = ImageOps.exif_transpose(img)
-        if img.mode in ("RGBA", "LA", "P"):
-            img = img.convert("RGBA")
-            bg = Image.new("RGB", img.size, "white")
-            bg.paste(img, mask=img.split()[3])
-            img = bg
-        else:
-            img = img.convert("RGB")
+        if mode == "fit" and img.format == "JPEG":   # a big JPEG shown small: the decoder itself skips the extra detail (2x faster)
+            img.draft("RGB", (max(W, H), max(W, H)))
+        img = flatten(ImageOps.exif_transpose(img))
         iw, ih = img.size
         rot = rotate and ((iw > ih) != (W > H))
         fw, fh = (ih, iw) if rot else (iw, ih)
@@ -1067,13 +1232,9 @@ def nup_plan(pages, n, copies):
 def natural_mm(f, idx):
     """Size of the page at its natural (100%) size, in mm."""
     if f["kind"] == "pdf":
-        with LOCK:
-            doc = fitz.open(f["path"])
-            try:
-                r = doc[idx].rect
-                return r.width * 25.4 / 72, r.height * 25.4 / 72
-            finally:
-                doc.close()
+        with pdf_doc(f["path"]) as doc:
+            r = doc[idx].rect
+            return r.width * 25.4 / 72, r.height * 25.4 / 72
     with Image.open(f["path"]) as im:
         try:
             dpi = float((im.info.get("dpi") or (300, 300))[0])
@@ -1091,26 +1252,15 @@ def load_source(f, idx, want_w, mono):
     """The page as one flat picture, about want_w pixels wide (never enlarged for pictures)."""
     want_w = max(16.0, float(want_w))
     if f["kind"] == "pdf":
-        with LOCK:
-            doc = fitz.open(f["path"])
-            try:
-                pg = doc[idx]
-                pw, ph = pg.rect.width, pg.rect.height
-                s = min(want_w / pw, 8000.0 / max(pw, ph))
-                pix = pg.get_pixmap(matrix=fitz.Matrix(s, s),
-                                    colorspace=fitz.csGRAY if mono else fitz.csRGB, alpha=False)
-                return Image.frombytes("L" if mono else "RGB", (pix.width, pix.height), pix.samples)
-            finally:
-                doc.close()
+        with pdf_doc(f["path"]) as doc:
+            pg = doc[idx]
+            pw, ph = pg.rect.width, pg.rect.height
+            s = min(want_w / pw, 8000.0 / max(pw, ph))
+            pix = pg.get_pixmap(matrix=fitz.Matrix(s, s),
+                                colorspace=fitz.csGRAY if mono else fitz.csRGB, alpha=False)
+            return Image.frombytes("L" if mono else "RGB", (pix.width, pix.height), pix.samples)
     img = Image.open(f["path"])
-    img = ImageOps.exif_transpose(img)
-    if img.mode in ("RGBA", "LA", "P"):
-        img = img.convert("RGBA")
-        bg = Image.new("RGB", img.size, "white")
-        bg.paste(img, mask=img.split()[3])
-        img = bg
-    else:
-        img = img.convert("RGB")
+    img = flatten(ImageOps.exif_transpose(img))
     if img.width > want_w:
         img = img.resize((max(1, int(want_w)), max(1, int(img.height * want_w / img.width))), Image.LANCZOS)
     return img.convert("L") if mono else img
@@ -1211,26 +1361,22 @@ def crop_source(f, idx, quad, want_w=None):
     reduced copy). PDF pages are drawn again at the size that is needed (at least 72 dpi, up to 1200 dpi), so text
     and drawings stay sharp. want_w = how many pixels wide the result will be used (PDF only)."""
     if f["kind"] == "pdf":
-        with LOCK:
-            doc = fitz.open(f["path"])
-            try:
-                pg = doc[idx]
-                pw, ph = pg.rect.width, pg.rect.height
-                P = [(x * pw, y * ph) for x, y in quad]
-                dd = lambda a, b: math.hypot(a[0] - b[0], a[1] - b[1])
-                ew = max(dd(P[0], P[1]), dd(P[3], P[2]), 1.0)
-                bx0, bx1 = min(p[0] for p in P), max(p[0] for p in P)
-                by0, by1 = min(p[1] for p in P), max(p[1] for p in P)
-                s = float(want_w or 2400) / ew
-                if not _is_rect(P, 1.0 / max(s, 0.01)):
-                    s *= 1.5                                  # slanted: draw bigger, the result is reduced after
-                s = max(1.0, min(s, 1200.0 / 72.0, 9000.0 / max(bx1 - bx0, by1 - by0, 1.0)))
-                clip = fitz.Rect(bx0 - 2, by0 - 2, bx1 + 2, by1 + 2) & pg.rect
-                pix = pg.get_pixmap(matrix=fitz.Matrix(s, s), clip=clip, colorspace=fitz.csRGB, alpha=False)
-                img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-                Q = [(x * s - pix.x, y * s - pix.y) for x, y in P]
-            finally:
-                doc.close()
+        with pdf_doc(f["path"]) as doc:
+            pg = doc[idx]
+            pw, ph = pg.rect.width, pg.rect.height
+            P = [(x * pw, y * ph) for x, y in quad]
+            dd = lambda a, b: math.hypot(a[0] - b[0], a[1] - b[1])
+            ew = max(dd(P[0], P[1]), dd(P[3], P[2]), 1.0)
+            bx0, bx1 = min(p[0] for p in P), max(p[0] for p in P)
+            by0, by1 = min(p[1] for p in P), max(p[1] for p in P)
+            s = float(want_w or 2400) / ew
+            if not _is_rect(P, 1.0 / max(s, 0.01)):
+                s *= 1.5                                  # slanted: draw bigger, the result is reduced after
+            s = max(1.0, min(s, 1200.0 / 72.0, 9000.0 / max(bx1 - bx0, by1 - by0, 1.0)))
+            clip = fitz.Rect(bx0 - 2, by0 - 2, bx1 + 2, by1 + 2) & pg.rect
+            pix = pg.get_pixmap(matrix=fitz.Matrix(s, s), clip=clip, colorspace=fitz.csRGB, alpha=False)
+            img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            Q = [(x * s - pix.x, y * s - pix.y) for x, y in P]
     else:
         img = load_source(f, idx, 1e9, False)   # the picture at its real size, never reduced
         Q = [(x * img.width, y * img.height) for x, y in quad]
@@ -1373,6 +1519,7 @@ def get_area(q, fresh=False):
 # At most a few big pictures are drawn at the same time (each one can be 50-100 MB at high quality).
 # Before, scrolling a long list started dozens of them at once: memory ran out and the program froze.
 RENDER_SEM = threading.BoundedSemaphore(3)
+THUMBS = {}   # (file, page, mtime) -> small JPEG, so the list can be redrawn without drawing again
 
 
 def limited(fn):
@@ -1389,7 +1536,22 @@ def thumb():
     f, p = get_page()
     if not f:
         return "", 404
-    return send_img(compose(f, p, 240, 320, False, rotate=False))
+    try:
+        key = (f["id"], p, os.stat(f["path"]).st_mtime_ns)
+    except OSError:
+        key = None
+    data = THUMBS.get(key) if key else None
+    if data is None:
+        b = io.BytesIO()
+        compose(f, p, 240, 320, False, rotate=False).save(b, "JPEG", quality=85)
+        data = b.getvalue()
+        if key:
+            THUMBS[key] = data
+            while len(THUMBS) > 400:          # about 10 KB each
+                THUMBS.pop(next(iter(THUMBS)), None)
+    r = send_file(io.BytesIO(data), mimetype="image/jpeg")
+    r.headers["Cache-Control"] = "private, max-age=600"
+    return r
 
 
 @app.get("/api/view")
@@ -1400,13 +1562,9 @@ def view():
     if not f:
         return "", 404
     if f["kind"] == "pdf":
-        with LOCK:
-            doc = fitz.open(f["path"])
-            try:
-                r = doc[p].rect
-                wmm, hmm = r.width * 25.4 / 72, r.height * 25.4 / 72
-            finally:
-                doc.close()
+        with pdf_doc(f["path"]) as doc:
+            r = doc[p].rect
+            wmm, hmm = r.width * 25.4 / 72, r.height * 25.4 / 72
     else:  # an image is shown on an A4 sheet
         wmm, hmm = (297.0, 210.0) if f["lands"][0] else (210.0, 297.0)
     try:
@@ -1581,24 +1739,23 @@ def profiles_new():
     if DIALOG_LOCK.locked():
         return jsonify(error="A settings window is already open"), 409
     base = find_profile(printer_name, d.get("base"))
-    jid = uuid.uuid4().hex[:8]
-    JOBS[jid] = {"state": "run", "kind": "profile"}
+    jid = new_job({"state": "run", "kind": "profile"})
 
     def run():
         with DIALOG_LOCK:
             try:
                 data = printing.driver_dialog(printer_name, base)
                 if data is None:
-                    JOBS[jid]["state"] = "cancel"
+                    job_end(jid, state="cancel")
                     return
                 pid = uuid.uuid4().hex[:8]
                 with PLOCK:
                     allp = load_profiles()
                     allp.setdefault(printer_name, []).append({"id": pid, "name": pname, "data": data})
                     save_profiles(allp)
-                JOBS[jid].update(state="done", profile={"id": pid, "name": pname})
+                job_end(jid, state="done", profile={"id": pid, "name": pname})
             except Exception as e:
-                JOBS[jid].update(state="error", error=str(e))
+                job_end(jid, state="error", error=str(e))
 
     threading.Thread(target=run, daemon=True).start()
     return jsonify(id=jid)
@@ -1615,12 +1772,38 @@ def profiles_delete(pid):
 
 
 # ---------------------------------------------------------------- print
+def job_pages(d):
+    """[(file, page index, added-blank-page key or None), ...] from a print / save request, or None when a file is gone."""
+    try:
+        return [(FILES[x[0]], int(x[1]), (str(x[2]) if len(x) > 2 else None)) for x in d["pages"]]   # 3rd = an added blank page
+    except Exception:
+        return None
+
+
+def job_numargs(d):
+    """Page-number settings of a print / save request, in the form numspec() reads."""
+    nd = d.get("num") or {}
+    return {"num": "1" if nd.get("on") else "0", "npos": nd.get("pos"), "nalign": nd.get("align"),
+            "nsize": nd.get("size"), "nstart": nd.get("start"),
+            "nmargin": nd.get("margin"), "nbold": "1" if nd.get("bold") else "0"}
+
+
+def job_items(pages, lay):
+    """page_items(i) for a print / save job: the Transform pictures of sheet i (None = normal page, [] = blank page)."""
+    def page_items(i):
+        f, p, vk = pages[i]
+        lk = vk or f'{f["id"]}:{p}'
+        if lk not in lay:
+            return [] if vk else None
+        return clean_items(lay[lk], (f, p))   # an empty list = a blank page
+    return page_items
+
+
 @app.post("/api/print")
 def do_print():
     d = request.get_json(silent=True) or {}
-    try:
-        pages = [(FILES[x[0]], int(x[1]), (str(x[2]) if len(x) > 2 else None)) for x in d["pages"]]   # 3rd = an added blank page
-    except Exception:
+    pages = job_pages(d)
+    if pages is None:
         return jsonify(error="Files not found. Add them again."), 400
     if not pages:
         return jsonify(error="No pages selected"), 400
@@ -1629,28 +1812,19 @@ def do_print():
     except Exception:
         copies = 1
     orient = "landscape" if d.get("orient") == "landscape" else "portrait"
-    jid = uuid.uuid4().hex[:8]
     nup = get_nup(d.get("nup"))
     sheets, pcopies = None, copies
     if nup > 1:   # N pages on one sheet; copies of a short job fill the sheet (see nup_plan)
         sheets, pcopies = nup_plan([(f, p) for f, p, _ in pages], nup, copies)
-    JOBS[jid] = {"state": "run", "done": 0, "total": (len(sheets) if sheets else len(pages)) * pcopies}
+    jid = new_job({"state": "run", "done": 0, "total": (len(sheets) if sheets else len(pages)) * pcopies})
     color = d.get("color") == "color"
     profile = find_profile(d.get("printer", ""), d.get("profile"))  # None = normal way
     mode = d.get("scale") if d.get("scale") in SCALES else "fit"
     pct = get_pct(d.get("pct"))
     lay = d.get("layout") if isinstance(d.get("layout"), dict) and not sheets else {}   # only sent when Transform is on
-    nd = d.get("num") or {}
-    nargs = {"num": "1" if nd.get("on") else "0", "npos": nd.get("pos"), "nalign": nd.get("align"),
-             "nsize": nd.get("size"), "nstart": nd.get("start"),
-             "nmargin": nd.get("margin"), "nbold": "1" if nd.get("bold") else "0"}
+    nargs = job_numargs(d)
 
-    def page_items(i):
-        f, p, vk = pages[i]
-        lk = vk or f'{f["id"]}:{p}'
-        if lk not in lay:
-            return [] if vk else None
-        return clean_items(lay[lk], (f, p))   # an empty list = a blank page
+    page_items = job_items(pages, lay)
 
     def run():
         try:
@@ -1670,9 +1844,9 @@ def do_print():
                 len(sheets) if sheets else len(pages), provider,
                 lambda done, total: JOBS[jid].update(done=done, total=total),
                 d.get("title", "PC Print"), profile=profile)
-            JOBS[jid]["state"] = "done"
+            job_end(jid, state="done")
         except Exception as e:
-            JOBS[jid].update(state="error", error=str(e))
+            job_end(jid, state="error", error=str(e))
 
     threading.Thread(target=run, daemon=True).start()
     return jsonify(id=jid)
@@ -1811,9 +1985,8 @@ def save_pdf():
     """Same pages, same order, same layout, page numbers and Transform changes as printing - but into one PDF file
     in the chosen folder (page size = the paper, the picture sits where the printer would put it)."""
     d = request.get_json(silent=True) or {}
-    try:
-        pages = [(FILES[x[0]], int(x[1]), (str(x[2]) if len(x) > 2 else None)) for x in d["pages"]]
-    except Exception:
+    pages = job_pages(d)
+    if pages is None:
         return jsonify(error="Files not found. Add them again."), 400
     if not pages:
         return jsonify(error="No pages selected"), 400
@@ -1825,26 +1998,17 @@ def save_pdf():
     mode = d.get("scale") if d.get("scale") in SCALES else "fit"
     pct = get_pct(d.get("pct"))
     lay = d.get("layout") if isinstance(d.get("layout"), dict) else {}
-    nd = d.get("num") or {}
-    nargs = {"num": "1" if nd.get("on") else "0", "npos": nd.get("pos"), "nalign": nd.get("align"),
-             "nsize": nd.get("size"), "nstart": nd.get("start"),
-             "nmargin": nd.get("margin"), "nbold": "1" if nd.get("bold") else "0"}
+    nargs = job_numargs(d)
     area_q = {"printer": d.get("printer", ""), "paper": d.get("paper"), "color": "color" if color else "mono",
               "duplex": "off", "orient": orient, "w": d.get("w", 210), "h": d.get("h", 297)}
     base = safe_pdf_name(d.get("name"))
-    jid = uuid.uuid4().hex[:8]
     nup = get_nup(d.get("nup"))
     sheets = nup_groups([(f, p) for f, p, _ in pages], nup) if nup > 1 else None   # N pages on one sheet
     if sheets:
         lay = {}
-    JOBS[jid] = {"state": "run", "done": 0, "total": len(sheets) if sheets else len(pages)}
+    jid = new_job({"state": "run", "done": 0, "total": len(sheets) if sheets else len(pages)})
 
-    def page_items(i):
-        f, p, vk = pages[i]
-        lk = vk or f'{f["id"]}:{p}'
-        if lk not in lay:
-            return [] if vk else None
-        return clean_items(lay[lk], (f, p))
+    page_items = job_items(pages, lay)
 
     def run():
         tmp = None
@@ -1884,9 +2048,9 @@ def save_pdf():
                     doc.close()
             os.replace(tmp, path)
             tmp = None
-            JOBS[jid].update(state="done", path=path)
+            job_end(jid, state="done", path=path)
         except Exception as e:
-            JOBS[jid].update(state="error", error=str(e))
+            job_end(jid, state="error", error=str(e))
         finally:
             if tmp and os.path.exists(tmp):
                 try:
