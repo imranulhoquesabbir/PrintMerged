@@ -1,8 +1,9 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>Phone Print</title>
 <style>
 :root{--bg:#f4f5f7;--card:#fff;--tx:#1b1f24;--mut:#6b7280;--pri:#2563eb;--bd:#e5e7eb}
@@ -39,11 +40,63 @@ input[type=tel]{font:inherit;font-size:28px;letter-spacing:12px;text-align:cente
 #rd img{width:100%;display:block;margin:10px 0;border-radius:4px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.3);min-height:120px}
 button.s{padding:8px 12px}button:disabled{opacity:.45}
 .num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:11px;background:var(--pri);color:#fff;font-size:12px;font-weight:700;margin-right:6px}
+.ic{width:18px;height:18px;flex:none;vertical-align:-4px;--i1:currentColor;--i2:color-mix(in srgb,var(--i1) 16%,transparent);overflow:visible}
+@media(prefers-color-scheme:dark){.ic{filter:brightness(1.18) saturate(1.05)}}
+.i-menu{--i1:#64748b}
+.i-printer{--i1:#2563eb}
+.i-paste{--i1:#d97706}
+.i-hash{--i1:#7c3aed}
+.i-phone{--i1:#059669}
+.i-fit{--i1:#0d9488}
+.i-move{--i1:#db2777}
+.i-refresh{--i1:#0891b2}
+.i-save{--i1:#16a34a}
+.i-folder{--i1:#f59e0b}
+.i-select{--i1:#2563eb}
+.i-copy{--i1:#6366f1}
+.i-rotate{--i1:#ea580c}
+.i-crop{--i1:#e11d48}
+.i-center{--i1:#0d9488}
+.i-trash{--i1:#dc2626}
+.i-reset{--i1:#64748b}
+.i-resetall{--i1:#475569}
+.i-lock{--i1:#d97706}
+.i-unlock{--i1:#94a3b8}
+.i-settings{--i1:#64748b}
+.i-download{--i1:#2563eb}
+.i-up{--i1:#64748b}
+.i-down{--i1:#64748b}
+.i-eye{--i1:#6366f1}
+.i-file{--i1:#2563eb}
+.i-resize{--i1:#f59e0b}
+.i-undo{--i1:#64748b}
+.i-redo{--i1:#64748b}
+.i-warn{--i1:#d97706}
+.i-help{--i1:#64748b}
+button.p .ic,.tx .ic,#tfhud .ic,#tfflash .ic,.badge .ic,.pill .ic,button.dkb .ic{--i1:currentColor;--i2:transparent;filter:none}
+.ibtn{display:inline-flex;align-items:center;justify-content:center;gap:7px}
+.ic{width:20px;height:20px}
+h1{display:flex;align-items:center;gap:8px}
+h1 .ic{width:26px;height:26px}
+.card{box-shadow:0 1px 3px rgba(0,0,0,.06)}
+button{cursor:pointer;transition:background-color .15s,border-color .15s,transform .09s,filter .15s,opacity .15s}
+button:active:not(:disabled){transform:scale(.96)}
+button.p:hover:not(:disabled){filter:brightness(1.08)}
+:focus{outline:none}
+:focus-visible{outline:2px solid var(--pri);outline-offset:2px;border-radius:10px}
+.card,.pg{animation:cin .22s ease both}
+@keyframes cin{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.pg img,.pvsheet img,#rd img{animation:imgin .25s ease both}
+@keyframes imgin{from{opacity:0}to{opacity:1}}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#111;color:#fff;padding:11px 16px;border-radius:12px;z-index:30;max-width:88%;white-space:pre-line;box-shadow:0 6px 20px rgba(0,0,0,.35);font-size:15px}
+.pill{display:inline-block}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 </style>
 </head>
 <body>
+<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs><symbol id="i-menu" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M4 6h16M4 12h16M4 18h16"/></g></symbol><symbol id="i-printer" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="9" rx="2.5"/><path d="M7 14h10v7H7z"/></g></symbol><symbol id="i-paste" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><rect x="5" y="4" width="14" height="17" rx="2.5"/><path d="M9 4.5h6V7H9z"/></g></symbol><symbol id="i-hash" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M9.5 4 7.5 20M16.5 4l-2 16M4 9h16M3.5 15h16"/></g></symbol><symbol id="i-phone" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path fill="none" d="M11 18h2"/></g></symbol><symbol id="i-minus" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M5 12h14"/></g></symbol><symbol id="i-plus" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M12 5v14M5 12h14"/></g></symbol><symbol id="i-fit" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><rect x="9" y="9" width="6" height="6" rx="1"/></g></symbol><symbol id="i-move" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></g></symbol><symbol id="i-refresh" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></g></symbol><symbol id="i-arrow-right" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M4 12h16M14 6l6 6-6 6"/></g></symbol><symbol id="i-arrow-left" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M20 12H4M10 6l-6 6 6 6"/></g></symbol><symbol id="i-save" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M5 3h11l4 4v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path fill="none" d="M7 3v6h8V3M7 21v-7h10v7"/></g></symbol><symbol id="i-folder" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M3 6a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></g></symbol><symbol id="i-select" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><rect x="3.5" y="3.5" width="17" height="17" rx="3.5"/><path fill="none" d="M8 12l3 3 5-6"/></g></symbol><symbol id="i-copy" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><rect x="9" y="9" width="12" height="12" rx="2.5"/><path fill="none" d="M5 15V6a2 2 0 0 1 2-2h8"/></g></symbol><symbol id="i-rotate" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M21 12a9 9 0 1 1-3-6.7M21 3v6h-6"/></g></symbol><symbol id="i-crop" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M6 2v14a2 2 0 0 0 2 2h14M18 22V8a2 2 0 0 0-2-2H2"/></g></symbol><symbol id="i-center" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="4"/><path fill="none" d="M12 2v4M12 18v4M2 12h4M18 12h4"/></g></symbol><symbol id="i-trash" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M5.5 7h13l-1 13a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2z"/><path fill="none" d="M3 7h18M9 7V4h6v3M10 11v6M14 11v6"/></g></symbol><symbol id="i-reset" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M3 12a9 9 0 1 0 3-6.7M3 3v6h6"/></g></symbol><symbol id="i-resetall" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M3 12a9 9 0 1 0 3-6.7M3 3v6h6"/><circle cx="12" cy="12" r="2.5"/></g></symbol><symbol id="i-lock" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path fill="none" d="M8 11V8a4 4 0 0 1 8 0v3"/></g></symbol><symbol id="i-unlock" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path fill="none" d="M8 11V8a4 4 0 0 1 7.5-2"/></g></symbol><symbol id="i-settings" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M4 6h9M19 6h1M4 12h3M13 12h7M4 18h11M21 18h-1"/><circle cx="16" cy="6" r="2.2"/><circle cx="10" cy="12" r="2.2"/><circle cx="18" cy="18" r="2.2"/></g></symbol><symbol id="i-download" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M12 3v12M7 10l5 5 5-5M4 20h16"/></g></symbol><symbol id="i-up" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M12 19V5M6 11l6-6 6 6"/></g></symbol><symbol id="i-down" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M12 5v14M6 13l6 6 6-6"/></g></symbol><symbol id="i-x" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M6 6l12 12M18 6 6 18"/></g></symbol><symbol id="i-check" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M5 12.5l4.5 4.5L19 7"/></g></symbol><symbol id="i-eye" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></g></symbol><symbol id="i-file" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M6 2h8l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path fill="none" d="M14 2v5h5"/></g></symbol><symbol id="i-resize" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></g></symbol><symbol id="i-undo" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></g></symbol><symbol id="i-redo" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path fill="none" d="M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3"/></g></symbol><symbol id="i-warn" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M12 3 2 20h20z"/><path fill="none" d="M12 10v4M12 17.5v.1"/></g></symbol><symbol id="i-help" viewBox="0 0 24 24"><g style="fill:var(--i2);stroke:var(--i1);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="9"/><path fill="none" d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17v.1"/></g></symbol></defs></svg>
 <div class="wrap">
-  <h1>📄 Phone Print</h1>
+  <h1><svg class="ic i-printer" aria-hidden="true"><use href="#i-printer"/></svg>Phone Print</h1>
   <div style="font-size:12px;opacity:.65;margin:-6px 0 10px">Made by Imranul Hoque Sabbir</div>
 
   <div id="login" class="card" hidden>
@@ -55,7 +108,7 @@ button.s{padding:8px 12px}button:disabled{opacity:.45}
 
   <div id="main" hidden>
     <div class="card">
-      <label class="btn p">Choose files (PDF / images)
+      <label class="btn p ibtn" style="display:flex"><svg class="ic i-plus" aria-hidden="true"><use href="#i-plus"/></svg>Choose files (PDF / images)
         <input id="pick" type="file" multiple accept=".pdf,image/*" hidden>
       </label>
       <p id="ustat" class="mut"></p>
@@ -73,7 +126,7 @@ button.s{padding:8px 12px}button:disabled{opacity:.45}
 
 <div id="dlg" hidden>
   <div class="wrap">
-    <div class="row"><button id="close">← Back</button><div class="name grow" id="ptitle"></div></div>
+    <div class="row"><button id="close" class="ibtn"><svg class="ic i-arrow-left" aria-hidden="true"><use href="#i-arrow-left"/></svg>Back</button><div class="name grow" id="ptitle"></div></div>
     <p class="mut">Select pages to print</p>
     <div class="grid" id="pgrid"></div>
     <div class="card" style="margin-top:14px">
@@ -81,8 +134,8 @@ button.s{padding:8px 12px}button:disabled{opacity:.45}
       <div class="field"><label>Profile (saved driver settings)</label>
         <select id="profile"><option value="">None (normal way)</option></select>
         <div class="row">
-          <button id="bprof" class="grow">⚙ Printer Properties (save as profile)</button>
-          <button id="bdel" class="x" hidden>🗑 Delete</button>
+          <button id="bprof" class="grow ibtn"><svg class="ic i-settings" aria-hidden="true"><use href="#i-settings"/></svg>Printer Properties (save as profile)</button>
+          <button id="bdel" class="x ibtn" hidden><svg class="ic i-trash" aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>
         </div>
         <p class="mut" id="pnote"></p>
       </div>
@@ -103,10 +156,10 @@ button.s{padding:8px 12px}button:disabled{opacity:.45}
       <div class="field"><label>Copies</label><input id="copies" type="number" min="1" max="99" value="1" inputmode="numeric"></div>
       <div class="field"><label>Scaling</label><select id="scale"></select>
         <div id="pctbox" class="row" hidden>
-          <button id="pctm" type="button">−</button>
+          <button id="pctm" type="button" class="ibtn" aria-label="Less"><svg class="ic i-minus" aria-hidden="true"><use href="#i-minus"/></svg></button>
           <input id="pct" type="number" min="10" max="400" step="5" value="100" inputmode="numeric" style="width:90px">
           <span>%</span>
-          <button id="pctp" type="button">+</button>
+          <button id="pctp" type="button" class="ibtn" aria-label="More"><svg class="ic i-plus" aria-hidden="true"><use href="#i-plus"/></svg></button>
         </div>
         <input id="pctr" type="range" min="10" max="300" step="5" value="100" hidden>
         <p class="mut" id="scnote"></p></div>
@@ -122,27 +175,27 @@ button.s{padding:8px 12px}button:disabled{opacity:.45}
         </div></div>
       <p class="mut" id="dnote"></p>
       <div class="row">
-        <button id="bprev" class="grow">👁 Preview</button>
-        <button id="bprint" class="grow p">🖨 Print</button>
+        <button id="bprev" class="grow ibtn"><svg class="ic i-eye" aria-hidden="true"><use href="#i-eye"/></svg>Preview</button>
+        <button id="bprint" class="grow p ibtn"><svg class="ic i-printer" aria-hidden="true"><use href="#i-printer"/></svg>Print</button>
       </div>
       <p id="pmsg"></p>
     </div>
   </div>
 </div>
 
-<div id="rd" hidden><div class="wrap"><div class="row"><button id="rdclose">✕ Close</button><div class="name grow" id="rdtitle"></div></div><div id="rdb"></div></div></div>
+<div id="rd" hidden><div class="wrap"><div class="row"><button id="rdclose" class="ibtn"><svg class="ic i-x" aria-hidden="true"><use href="#i-x"/></svg>Close</button><div class="name grow" id="rdtitle"></div></div><div id="rdb"></div></div></div>
 
 <div id="pv" hidden>
   <div class="wrap">
-    <div class="row"><button id="pvclose">✕ Close</button><div class="name grow" id="pvtitle">Print preview</div></div>
+    <div class="row"><button id="pvclose" class="ibtn"><svg class="ic i-x" aria-hidden="true"><use href="#i-x"/></svg>Close</button><div class="name grow" id="pvtitle">Print preview</div></div>
     <div class="field" style="margin-top:12px"><label>Scaling</label><select id="pvscale"></select>
       <div id="pvpct" class="row" hidden>
-        <button id="pvpm" type="button">−</button><span class="name" id="pvpv">100%</span><button id="pvpp" type="button">+</button>
+        <button id="pvpm" type="button" class="ibtn" aria-label="Less"><svg class="ic i-minus" aria-hidden="true"><use href="#i-minus"/></svg></button><span class="name" id="pvpv">100%</span><button id="pvpp" type="button" class="ibtn" aria-label="More"><svg class="ic i-plus" aria-hidden="true"><use href="#i-plus"/></svg></button>
       </div>
     </div>
     <div class="pvstage" id="pvstage"></div>
     <div class="row" style="justify-content:center">
-      <button id="pvprev">‹ Prev</button><span id="pvpos" class="name"></span><button id="pvnext">Next ›</button>
+      <button id="pvprev" class="ibtn"><svg class="ic i-arrow-left" aria-hidden="true"><use href="#i-arrow-left"/></svg>Prev</button><span id="pvpos" class="name"></span><button id="pvnext" class="ibtn">Next<svg class="ic i-arrow-right" aria-hidden="true"><use href="#i-arrow-right"/></svg></button>
     </div>
     <p class="mut" style="text-align:center">
       <span class="lg" style="background:#cdd0d6;border:1px solid #888"></span>printer cannot print here &nbsp;
@@ -152,10 +205,16 @@ button.s{padding:8px 12px}button:disabled{opacity:.45}
   </div>
 </div>
 
+<div id="toast" hidden role="status" aria-live="polite"></div>
 <script>
 const $=s=>document.querySelector(s);
 let FILES=[],CAPS=null,CUR=null,REV=-1,SREV=-1,PRN={},prT=null;
 const NUM={on:false,pos:'bottom',align:'center',size:12,start:1,bold:false,margin:8};
+const SVGNS='http://www.w3.org/2000/svg';
+function ic(n){const s=document.createElementNS(SVGNS,'svg');s.setAttribute('class','ic i-'+n);s.setAttribute('aria-hidden','true');
+  const u=document.createElementNS(SVGNS,'use');u.setAttribute('href','#i-'+n);s.append(u);return s}
+let tT=null;
+function toast(t){const b=$('#toast');b.textContent=t;b.hidden=false;clearTimeout(tT);tT=setTimeout(()=>b.hidden=true,4500)}
 function el(t,props={},...kids){const e=document.createElement(t);Object.assign(e,props);kids.forEach(k=>e.append(k));return e}
 async function api(url,opt){const r=await fetch(url,opt);if(r.status===401){show('login');throw new Error('login')}return r}
 function show(v){$('#login').hidden=v!=='login';$('#main').hidden=v!=='main'}
@@ -177,8 +236,8 @@ $('#pick').onchange=async e=>{
 function up(f,i,n){return new Promise(res=>{
   const x=new XMLHttpRequest();x.open('POST','/api/upload');
   x.upload.onprogress=ev=>{if(ev.lengthComputable)$('#ustat').textContent=`Uploading ${i}/${n}: ${f.name} ${Math.round(ev.loaded/ev.total*100)}%`};
-  x.onload=()=>{if(x.status!==200){try{alert(JSON.parse(x.responseText).error)}catch{}}res()};
-  x.onerror=()=>{alert('Upload failed: '+f.name);res()};
+  x.onload=()=>{if(x.status!==200){try{toast(JSON.parse(x.responseText).error)}catch{}}res()};
+  x.onerror=()=>{toast('Upload failed: '+f.name);res()};
   const fd=new FormData();fd.append('file',f);x.send(fd);
 })}
 
@@ -187,22 +246,22 @@ function render(){
   const L=$('#list');L.innerHTML='';
   FILES.forEach((f,k)=>{
     const nl=live(f).length,meta=f.kind==='pdf'?`PDF · ${nl} page${nl>1?'s':''}`:'Image';
-    const b=el('button',{className:'p',textContent:'🖨 Print'});
+    const b=el('button',{className:'p ibtn'},ic('printer'),'Print');
     b.onclick=()=>openPrint(f.name,live(f).map((i,j)=>({f:f.id,p:i,land:f.lands[i],label:'Page '+(j+1)})));
-    const mv=(d,t,dis)=>{const x=el('button',{className:'s',textContent:t,disabled:dis});x.onclick=async()=>{await api('/api/move',{method:'POST',headers:JH,body:JSON.stringify({id:f.id,dir:d})});loadFiles()};return x};
-    const d=el('button',{className:'x',textContent:'✕'});
+    const mv=(d,t,dis)=>{const x=el('button',{className:'s ibtn',disabled:dis,title:d==='up'?'Move up':'Move down',ariaLabel:d==='up'?'Move up':'Move down'},ic(d));x.onclick=async()=>{await api('/api/move',{method:'POST',headers:JH,body:JSON.stringify({id:f.id,dir:d})});loadFiles()};return x};
+    const d=el('button',{className:'x ibtn',title:'Remove',ariaLabel:'Remove'},ic('x'));
     d.onclick=async()=>{await api('/api/files/'+f.id,{method:'DELETE'});loadFiles()};
     const nm=el('div',{className:'name',textContent:f.name});nm.style.cursor='pointer';nm.title='Read';nm.onclick=()=>readFile(f);
     nm.prepend(el('span',{className:'num',textContent:k+1}));
     L.append(el('div',{className:'card'},el('div',{className:'row'},
       el('div',{className:'grow'},nm,el('div',{className:'mut',textContent:meta})),
-      mv('up','↑',k===0),mv('down','↓',k===FILES.length-1),b,d)));
+      mv('up',0,k===0),mv('down',0,k===FILES.length-1),b,d)));
   });
   $('#all').hidden=!FILES.length;
   const A=$('#allbtns');A.innerHTML='';
   if(FILES.length){
     const tot=FILES.reduce((a,f)=>a+live(f).length,0);
-    const b=el('button',{className:'p',textContent:`🖨 Print all (${tot} page${tot>1?'s':''})`});
+    const b=el('button',{className:'p ibtn'},ic('printer'),`Print all (${tot} page${tot>1?'s':''})`);
     b.onclick=()=>{let n=0,pages=[];FILES.forEach(f=>{const lv=live(f);lv.forEach((i,j)=>{n++;pages.push({f:f.id,p:i,land:f.lands[i],label:`${n}. ${f.name}${lv.length>1?' (p'+(j+1)+')':''}`})})});openPrint('All files',pages)};
     A.append(b);
   }
@@ -279,7 +338,7 @@ $('#bprof').onclick=async()=>{
   if(!$('#printer').value)return;
   const name=prompt('Name for this profile (e.g. Epson Glossy High, Toshiba 2-sided):');
   if(!name||!name.trim())return;
-  msg('⚠ A settings window is opening on the PC. Choose the options there and press OK.');
+  msg('Note: a settings window is opening on the PC. Choose the options there and press OK.');
   try{
     const r=await api('/api/profiles/new',{method:'POST',headers:JH,body:JSON.stringify({printer:$('#printer').value,name:name.trim()})});
     const j=await r.json();
@@ -345,8 +404,8 @@ $('#pvpp').onclick=()=>{setPct((parseFloat($('#pct').value)||100)+5);pvShow()};
 let PV={list:[],i:0,step:1};
 const dupOn=()=>CAPS&&CAPS.duplex&&!$('#profile').value&&$('#duplex').value!=='off';
 $('#bprev').onclick=()=>{
-  const s=sel();if(!s.length)return alert('Select at least one page');
-  if(!CAPS||CAPS.error)return alert('Select a printer first');
+  const s=sel();if(!s.length)return toast('Select at least one page');
+  if(!CAPS||CAPS.error)return toast('Select a printer first');
   PV={list:s,i:0,step:dupOn()?2:1};
   $('#pv').hidden=false;pvShow();
 };
@@ -386,8 +445,8 @@ $('#pvstage').addEventListener('touchend',e=>{
 },{passive:true});
 
 $('#bprint').onclick=async()=>{
-  const s=sel();if(!s.length)return alert('Select at least one page');
-  if(!CAPS||CAPS.error)return alert('Select a printer first');
+  const s=sel();if(!s.length)return toast('Select at least one page');
+  if(!CAPS||CAPS.error)return toast('Select a printer first');
   const copies=Math.max(1,Math.min(99,parseInt($('#copies').value)||1));
   const body={printer:$('#printer').value,paper:$('#paper').value,color:$('#color').value,
     duplex:CAPS.duplex?$('#duplex').value:'off',orient:orient(),copies,
@@ -451,15 +510,16 @@ async function loadSet(){
   }catch{}
 }
 /* live: files and settings changed on the PC (or another phone) appear here within a second */
-setInterval(async()=>{
-  if($('#main').hidden)return;
+async function poll(){
+  if($('#main').hidden||document.hidden)return;
   try{
-    const j=await (await api('/api/state')).json();
-    if(j.notice)alert(j.notice);
+    const j=await (await api(REV===-1?'/api/state':`/api/state?rev=${REV}&srev=${SREV}`)).json();
     if(j.srev!==undefined&&j.srev!==SREV){const first=SREV===-1;SREV=j.srev;if(!first)loadSet()}
+    if(j.same)return;
     if(j.rev!==REV){REV=j.rev;FILES=j.files;render()}
   }catch{}
-},1200);
+}
+setInterval(poll,1200);document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll()});
 fetch('/api/files').then(r=>{if(r.status===401)show('login');else init()});
 </script>
 </body>
