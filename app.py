@@ -115,6 +115,69 @@ def port_file():
     return os.path.join(CFG_DIR, "port.txt")
 
 
+def pid_file():
+    return os.path.join(CFG_DIR, "pid.txt")
+
+
+def write_pid():
+    """The first window writes who it is and when it started (used to find a stuck first window, see primary_stuck)."""
+    try:
+        os.makedirs(CFG_DIR, exist_ok=True)
+        with open(pid_file(), "w") as fh:
+            fh.write("%d,%d" % (os.getpid(), int(time.time())))
+    except Exception:
+        pass
+
+
+def read_pid():
+    try:
+        with open(pid_file()) as fh:
+            a, b = fh.read().strip().split(",")
+        return int(a), int(b)
+    except Exception:
+        return None
+
+
+def primary_stuck():
+    """pid of the first window when it does not answer although it is NOT just starting (started more than 45 s ago).
+    A window that was closed but whose process never ended looks like this: it keeps the 'one window' lock, so every
+    later double click found it, got no answer and nothing opened."""
+    info = read_pid()
+    if not info or time.time() - info[1] < 45:
+        return None
+    return info[0]
+
+
+def kill_if_ours(pid):
+    """Ends process `pid` ONLY when it is this very program (same .exe), so a reused pid can never hit another program."""
+    if not getattr(sys, "frozen", False):
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        k.OpenProcess.restype = wintypes.HANDLE
+        k.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        k.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+        k.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        k.CloseHandle.argtypes = [wintypes.HANDLE]
+        h = k.OpenProcess(0x1000 | 0x0001, False, pid)       # QUERY_LIMITED_INFORMATION | TERMINATE
+        if not h:
+            return False
+        try:
+            buf = ctypes.create_unicode_buffer(1024)
+            n = wintypes.DWORD(1024)
+            if not k.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)):
+                return False
+            if os.path.normcase(os.path.abspath(buf.value)) != os.path.normcase(os.path.abspath(sys.executable)):
+                return False
+            return bool(k.TerminateProcess(h, 1))
+        finally:
+            k.CloseHandle(h)
+    except Exception:
+        return False
+
+
 def is_primary():
     """True for the first launch. Later launches (Windows starts one process per file)
     hand their files to the first window. Uses a Windows mutex, which is reliable
@@ -124,8 +187,14 @@ def is_primary():
         import ctypes
         k = ctypes.WinDLL("kernel32", use_last_error=True)
         k.CreateMutexW.restype = ctypes.c_void_p
-        MUTEX = k.CreateMutexW(None, False, "Local\\PCPrintSingleWindow")
-        return ctypes.get_last_error() != 183   # 183 = already exists
+        k.CloseHandle.argtypes = [ctypes.c_void_p]
+        h = k.CreateMutexW(None, False, "Local\\PCPrintSingleWindow")
+        if ctypes.get_last_error() == 183:      # 183 = already exists: another process is the first window
+            if h:
+                k.CloseHandle(h)                # our own handle must not keep the lock alive after that process ends
+            return False
+        MUTEX = h
+        return True
     except Exception:
         return True
 
@@ -147,10 +216,10 @@ def allow_foreground():
         pass
 
 
-def forward(paths):
-    """Send files to the window that is already open (waits until it is ready)."""
+def forward(paths, tries=60):
+    """Send files to the window that is already open (waits until it is ready: tries x 0.5 s)."""
     allow_foreground()
-    for _ in range(60):
+    for _ in range(tries):
         try:
             with open(port_file()) as fh:
                 port = int(fh.read().strip())
@@ -333,9 +402,23 @@ def main():
 
     startup = "--startup" in sys.argv   # started by Windows: open minimized
     if not is_primary():
-        if not startup:
-            forward(paths)
-        return
+        if startup:
+            return
+        if forward(paths, tries=6):                 # a working window answers at once
+            return
+        pid = primary_stuck()
+        recovered = False
+        info = read_pid()
+        if pid and info and info[0] == pid and kill_if_ours(pid):
+            for _ in range(40):                     # the lock is free as soon as the old process is gone
+                time.sleep(0.25)
+                if is_primary():
+                    recovered = True                # this launch is the first window now
+                    break
+        if not recovered:
+            forward(paths)                          # a window that is still starting (or another launch recovered): wait for it
+            return
+    write_pid()
 
     global make_server, server, updatemgr
     from werkzeug.serving import make_server
@@ -374,6 +457,18 @@ def main():
 
     win.events.closing += on_closing
 
+    def on_closed(*a):
+        # the window is gone: if the rest of the shut down hangs for any reason, the process is ended anyway, so it can
+        # never stay in the background holding the 'one window' lock (then no new window could open any more)
+        t = threading.Timer(8, lambda: os._exit(0))
+        t.daemon = True
+        t.start()
+
+    try:
+        win.events.closed += on_closed
+    except Exception:
+        pass
+
     def pick():
         kind = webview.FileDialog.OPEN if hasattr(webview, "FileDialog") else webview.OPEN_DIALOG
         r = win.create_file_dialog(
@@ -401,6 +496,9 @@ def main():
         webview.start(private_mode=False, storage_path=os.path.join(server.CFG_DIR, "webview"))
     except TypeError:      # an old pywebview without these options
         webview.start()
+    t = threading.Timer(5, lambda: os._exit(0))        # if one of the steps below hangs, end the process anyway
+    t.daemon = True
+    t.start()
     if tray:
         try:
             tray.stop()
@@ -411,6 +509,7 @@ def main():
     except Exception:
         pass
     server.cleanup()
+    os._exit(0)                                         # the lock is released now; nothing may keep the process alive
 
 
 if __name__ == "__main__":
