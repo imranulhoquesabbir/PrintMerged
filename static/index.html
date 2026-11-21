@@ -508,6 +508,7 @@ button,select,input{transition:background-color .15s,border-color .15s,box-shado
         <button id="tfRot90" class="tbtn" title="Rotate 90° clockwise (R, Shift+R = back)" aria-label="Rotate 90 degrees"><svg class="ic i-rotate" aria-hidden="true"><use href="#i-rotate"/></svg><span class="t">Rotate 90°</span> <kbd>R</kbd></button>
         <button id="tfCrop" class="tbtn" title="Perspective crop: pull the 4 corners onto the area you want (like Photoshop) and it is cut out straight. Cut from the original, so no quality is lost. (C)" aria-label="Perspective crop"><svg class="ic i-crop" aria-hidden="true"><use href="#i-crop"/></svg><span class="t">Perspective crop</span> <kbd>C</kbd></button>
         <button id="tfCenter" class="tbtn hideS" title="Center on the page" aria-label="Center"><svg class="ic i-center" aria-hidden="true"><use href="#i-center"/></svg><span class="t">Center</span></button>
+        <button id="tfFit" class="tbtn" title="Fit the selected pictures inside the printable area: same shape, nothing cut off, centred (F)" aria-label="Fit to printable area"><svg class="ic i-fit" aria-hidden="true"><use href="#i-fit"/></svg><span class="t">Fit</span> <kbd>F</kbd></button>
         <button id="tfDel" class="tbtn dng" title="Delete the selected pictures (Delete key)" aria-label="Delete"><svg class="ic i-trash" aria-hidden="true"><use href="#i-trash"/></svg></button>
         <span class="tfright">
           <button id="tfReset" class="tbtn" title="Reset page: put this page back to the normal layout" aria-label="Reset page"><svg class="ic i-reset" aria-hidden="true"><use href="#i-reset"/></svg><span class="t">Reset page</span></button>
@@ -543,6 +544,7 @@ button,select,input{transition:background-color .15s,border-color .15s,box-shado
         <div><b>Alt + drag</b><span>copy (all selected together)</span></div>
         <div><b>Shift + drag</b><span>move / copy dead straight (sideways, up / down, diagonal)</span></div>
         <div><b>Corner handles</b><span>resize · Shift = free shape</span></div>
+        <div><b>F / Fit button</b><span>fit the selected picture(s) inside the printable area (brings back one that went outside)</span></div>
         <div><b>C / crop button</b><span>perspective crop of the selected picture (pull 4 corners, lossless)</span></div>
         <div><b>R / Shift + R</b><span>rotate 90° clockwise / back</span></div>
         <div><b>R, nothing selected</b><span>mouse on a page = that page · mouse elsewhere = all pages</span></div>
@@ -1759,12 +1761,14 @@ function tfDrag(e,box,idx,mode,hd,onClick,isCopy){
     document.querySelectorAll('.tfdrop').forEach(b=>{b.classList.remove('tfdrop','cp')});
     document.body.classList.remove('tfdragging','tfbusy');box.classList.remove('tfsrc');box._clip.style.overflow='';
     hl.forEach(n=>n.classList.remove('lift','cp','rs'));tfHudOff();
+    const crossed=moved&&mode==='move'&&!cancel&&tb&&tb!==box&&LAY[tb._k];
     if(moved&&mode==='move'&&!cancel){
       if(tb&&tb!==box&&LAY[tb._k]){tfMoveAcross(box,tb,idx,os,r,ev.clientX-x0,ev.clientY-y0,kx);return}
       if(isCopy){tfBorn(k,idx);tfFlash('⧉',items.length>1?`Copied ${items.length} pictures`:'Picture copied')}
     }
     if(moved&&mode==='rs'&&!cancel){const it=items[0];tfFlash('⤡',`Resized to ${fmt(it.w)} × ${fmt(it.h)} ${un}`)}
     if(!moved&&onClick)onClick();
+    if(moved&&!cancel&&!crossed&&items.some(tfOutside))setTimeout(()=>tfFlash('⤡','Outside the printable area (it will be cut off). Press Fit to bring it back'),900);
   };
   const up=ev=>end(ev,false),cn=ev=>end(ev,true);
   window.addEventListener('pointermove',mv);window.addEventListener('pointerup',up);window.addEventListener('pointercancel',cn);
@@ -1783,6 +1787,7 @@ function tfMoveAcross(src,dst,idx,os,r0,dx,dy,kx){
   if(!LS.items.length)tfDropPage(src._k);
   else{tfBuild(src);tfBuild(dst);tfSelChanged()}
   tfFlash('➜',`Moved to page ${dn}`);
+  if(moved.some(tfOutside))setTimeout(()=>tfFlash('⤡','Outside the printable area (it will be cut off). Press Fit to bring it back'),900);
 }
 let TFSCROLL=null;
 function tfDeletePage(k){   // remove the whole page together with everything on it
@@ -1853,7 +1858,7 @@ function tfSync(){
   if(!TF.on)return;
   const its=tfItems(),it=tfMain()||its[0],has=its.length>0,multi=its.length>1;
   if(TF.sel&&!has)TF.sel=null;
-  ['tfDup','tfRot90','tfCenter','tfDel'].forEach(id=>$('#'+id).disabled=!has);
+  ['tfDup','tfRot90','tfCenter','tfFit','tfDel'].forEach(id=>$('#'+id).disabled=!has);
   $('#tfAll').disabled=!document.querySelector('.tfbox');
   $('#tfCrop').disabled=its.length!==1;
   $('#tfhint').hidden=has;$('#tfflds').hidden=!has;
@@ -1922,6 +1927,25 @@ function tfSelectAll(){
   const b=tfTargetBox(null);if(!b)return;
   tfSetSel(b._k,LAY[b._k].items.map((_,i)=>i));tfSelChanged();
 }
+function tfBBox(it){   // the turned picture's outline on the page: [left, top, right, bottom] in mm
+  const t=(it.rot||0)*Math.PI/180,c=Math.cos(t),sn=Math.sin(t),hw=it.w/2,hh=it.h/2,xs=[],ys=[];
+  [[-hw,-hh],[hw,-hh],[hw,hh],[-hw,hh]].forEach(([x,y])=>{xs.push(it.cx+x*c-y*sn);ys.push(it.cy+x*sn+y*c)});
+  return [Math.min(...xs),Math.min(...ys),Math.max(...xs),Math.max(...ys)];
+}
+function tfOutside(it){   // true when a picture that COULD fit the printable area sticks out of it (pictures that are bigger on purpose, e.g. Fill page, do not count)
+  const a=TFA;if(!a||!it)return false;const b=tfBBox(it),e=.5;
+  return ((b[2]-b[0])<=a.aw+e&&(b[0]<-e||b[2]>a.aw+e))||((b[3]-b[1])<=a.ah+e&&(b[1]<-e||b[3]>a.ah+e))||(b[2]<0||b[0]>a.aw||b[3]<0||b[1]>a.ah);
+}
+function tfFit(){   // the Fit button: selected picture(s) go inside the printable area, same shape, centred (several = kept together as a group)
+  const its=tfItems();if(!its.length||!TFA)return;
+  tfSnap();
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  its.forEach(it=>{const b=tfBBox(it);x0=Math.min(x0,b[0]);y0=Math.min(y0,b[1]);x1=Math.max(x1,b[2]);y1=Math.max(y1,b[3])});
+  const bw=x1-x0,bh=y1-y0;if(!(bw>0&&bh>0))return;
+  const f=Math.min(TFA.aw/bw,TFA.ah/bh),gx=(x0+x1)/2,gy=(y0+y1)/2;
+  its.forEach(it=>{it.cx=TFA.aw/2+(it.cx-gx)*f;it.cy=TFA.ah/2+(it.cy-gy)*f;it.w*=f;it.h*=f});
+  tfTouch();tfFlash('⤡','Fitted inside the printable area');
+}
 function tfCenter(){
   const its=tfItems();if(!its.length)return;tfSnap();
   let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;
@@ -1930,7 +1954,7 @@ function tfCenter(){
   its.forEach(it=>{it.cx+=dx;it.cy+=dy});tfTouch();tfFlash('⌖','Centered on the page');
 }
 $('#tfDup').onclick=tfDuplicate;$('#tfDel').onclick=tfDelete;$('#tfAll').onclick=tfSelectAll;
-$('#tfRot90').onclick=()=>tfRotate(90);$('#tfCenter').onclick=tfCenter;
+$('#tfRot90').onclick=()=>tfRotate(90);$('#tfCenter').onclick=tfCenter;$('#tfFit').onclick=tfFit;
 $('#tfReset').onclick=()=>{const b=tfTargetBox(null);if(!b)return;tfSnap();if(TFX.some(x=>x.k===b._k))LAY[b._k]={items:[],touched:true};else delete LAY[b._k];TF.sel=null;pvRender()};
 $('#tfResetAll').onclick=()=>{tfSnap();TFX=[];Object.keys(LAY).forEach(k=>delete LAY[k]);TFDEL.forEach(k=>setSel(k,true));TFDEL.clear();updateCount();TF.sel=null;pvRender()};
 $('#tfPage').onclick=tfAddPage;
@@ -2248,6 +2272,7 @@ document.addEventListener('keydown',e=>{
   else if(e.ctrlKey&&k==='d'){e.preventDefault();tfDuplicate()}
   else if(!e.ctrlKey&&!e.altKey&&k==='r'){e.preventDefault();tfRotate(e.shiftKey?-90:90)}
   else if(!e.ctrlKey&&!e.altKey&&!e.metaKey&&k==='c'){e.preventDefault();tfCropOpen()}
+  else if(!e.ctrlKey&&!e.altKey&&!e.metaKey&&k==='f'){e.preventDefault();tfFit()}
   else if(!e.ctrlKey&&e.key.startsWith('Arrow')){
     e.preventDefault();tfSnap('arrow');const d=e.shiftKey?10:1,its=tfItems();
     its.forEach(it=>{
