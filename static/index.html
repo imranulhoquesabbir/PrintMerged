@@ -542,7 +542,7 @@ button,select,input{transition:background-color .15s,border-color .15s,box-shado
         <div><b>Ctrl + A</b><span>select all on this page</span></div>
         <div><b>Drag</b><span>move (all selected together)</span></div>
         <div><b>Alt + drag</b><span>copy (all selected together)</span></div>
-        <div><b>Shift + drag</b><span>move / copy dead straight (sideways, up / down, diagonal)</span></div>
+        <div><b>Shift + drag</b><span>move / copy dead straight (sideways, up / down, diagonal). Stays on its page, unless you drag it onto another page</span></div>
         <div><b>Corner handles</b><span>resize · Shift = free shape</span></div>
         <div><b>F / Fit button</b><span>fit the selected picture(s) inside the printable area (brings back one that went outside)</span></div>
         <div><b>C / crop button</b><span>perspective crop of the selected picture (pull 4 corners, lossless)</span></div>
@@ -1692,6 +1692,14 @@ function snapStraight(dx,dy){   // Shift while dragging: sideways, up / down or 
   const a=Math.round(Math.atan2(dy,dx)/(Math.PI/4))*(Math.PI/4),ux=Math.cos(a),uy=Math.sin(a),t=dx*ux+dy*uy;
   return[t*ux,t*uy];
 }
+function tfPickDrop(box,it,straight,ev){   // which page a dragged picture lands on
+  const tb=tfBoxAt(ev);
+  if(!straight)return tb;                       // normal drag: the page under the mouse
+  // Shift (straight line) keeps the picture on its own page - but only while it is still on it. Once its centre has left this page's
+  // printable area it would be cut off and invisible, so it lands on the page it was dragged onto instead.
+  const a=TFA,out=!a||!it||it.cx<0||it.cx>a.aw||it.cy<0||it.cy>a.ah;
+  return (out&&tb&&tb!==box)?tb:null;
+}
 function tfHud(ev,cls,icon,title,detail){   // live read-out next to the mouse
   const h=$('#tfhud');
   if(h._c!==cls+icon+title){h._c=cls+icon+title;h.className=(h.classList.contains('on')?'on ':'')+cls;h.innerHTML='';h.append(el('i',{},glyphEl(icon)),el('b',{textContent:title}),el('span',{textContent:detail}))}
@@ -1738,7 +1746,7 @@ function tfDrag(e,box,idx,mode,hd,onClick,isCopy){
     L.touched=true;tfPlaceAll(box);tfSync();
     if(mode==='move'){
       document.querySelectorAll('.tfdrop').forEach(b=>{b.classList.remove('tfdrop','cp')});
-      const tb=straight?null:tfBoxAt(ev);dropBox=(tb&&tb!==box)?tb:null;   // Shift = stay on this page
+      const tb=tfPickDrop(box,items[0],straight,ev);dropBox=(tb&&tb!==box)?tb:null;   // Shift = stay on this page, unless the picture has already left it
       if(dropBox){dropBox.classList.add('tfdrop');dropBox.classList.toggle('cp',!!isCopy);
         dropBox.dataset.drop=(isCopy?'Copy to page ':'Move to page ')+tfPage(dropBox)}
       const st=$('#pvstage').getBoundingClientRect();   // scroll when near the top / bottom edge
@@ -1756,14 +1764,14 @@ function tfDrag(e,box,idx,mode,hd,onClick,isCopy){
   const mv=ev=>{last=ev;if(!raf)raf=requestAnimationFrame(()=>step(last))};   // one update per screen frame = smooth
   const end=(ev,cancel)=>{
     if(raf){cancelAnimationFrame(raf);raf=0;if(!cancel)step(ev)}            // the last mouse position is never lost
-    const tb=(moved&&mode==='move'&&!cancel&&!straight)?tfBoxAt(ev):null;   // look under the mouse before the dragging state is removed
+    const tb=(moved&&mode==='move'&&!cancel)?tfPickDrop(box,items[0],straight,ev):null;   // look under the mouse before the dragging state is removed
     window.removeEventListener('pointermove',mv);window.removeEventListener('pointerup',up);window.removeEventListener('pointercancel',cn);
     document.querySelectorAll('.tfdrop').forEach(b=>{b.classList.remove('tfdrop','cp')});
     document.body.classList.remove('tfdragging','tfbusy');box.classList.remove('tfsrc');box._clip.style.overflow='';
     hl.forEach(n=>n.classList.remove('lift','cp','rs'));tfHudOff();
     const crossed=moved&&mode==='move'&&!cancel&&tb&&tb!==box&&LAY[tb._k];
     if(moved&&mode==='move'&&!cancel){
-      if(tb&&tb!==box&&LAY[tb._k]){tfMoveAcross(box,tb,idx,os,r,ev.clientX-x0,ev.clientY-y0,kx);return}
+      if(tb&&tb!==box&&LAY[tb._k]){{const [mdx,mdy]=straight?snapStraight(ev.clientX-x0,ev.clientY-y0):[ev.clientX-x0,ev.clientY-y0];tfMoveAcross(box,tb,idx,os,r,mdx,mdy,kx)}return}
       if(isCopy){tfBorn(k,idx);tfFlash('⧉',items.length>1?`Copied ${items.length} pictures`:'Picture copied')}
     }
     if(moved&&mode==='rs'&&!cancel){const it=items[0];tfFlash('⤡',`Resized to ${fmt(it.w)} × ${fmt(it.h)} ${un}`)}
@@ -1775,7 +1783,7 @@ function tfDrag(e,box,idx,mode,hd,onClick,isCopy){
 }
 
 /* ---- move pictures to another page (drag), copy / cut / paste, add and remove pages ---- */
-function tfMoveAcross(src,dst,idx,os,r0,dx,dy,kx){
+function tfMoveAcross(src,dst,idx,os,r0,dx,dy,kx,quiet){
   const LS=LAY[src._k],LD=LAY[dst._k],a=TFA,rd=dst._ui.getBoundingClientRect();
   const moved=idx.map((i,t)=>({...os[t],
     cx:Math.max(0,Math.min(a.aw,(r0.left+os[t].cx*kx+dx-rd.left)/kx)),
@@ -1786,6 +1794,7 @@ function tfMoveAcross(src,dst,idx,os,r0,dx,dy,kx){
   const dn=tfPage(dst);
   if(!LS.items.length)tfDropPage(src._k);
   else{tfBuild(src);tfBuild(dst);tfSelChanged()}
+  if(quiet)return;
   tfFlash('➜',`Moved to page ${dn}`);
   if(moved.some(tfOutside))setTimeout(()=>tfFlash('⤡','Outside the printable area (it will be cut off). Press Fit to bring it back'),900);
 }
@@ -1936,9 +1945,28 @@ function tfOutside(it){   // true when a picture that COULD fit the printable ar
   const a=TFA;if(!a||!it)return false;const b=tfBBox(it),e=.5;
   return ((b[2]-b[0])<=a.aw+e&&(b[0]<-e||b[2]>a.aw+e))||((b[3]-b[1])<=a.ah+e&&(b[1]<-e||b[3]>a.ah+e))||(b[2]<0||b[0]>a.aw||b[3]<0||b[1]>a.ah);
 }
-function tfFit(){   // the Fit button: selected picture(s) go inside the printable area, same shape, centred (several = kept together as a group)
-  const its=tfItems();if(!its.length||!TFA)return;
+function tfFit(){   // the Fit button: selected picture(s) go inside the printable area of the page they are on NOW, same shape, centred (several = kept together as a group)
+  let its=tfItems();if(!its.length||!TFA)return;
   tfSnap();
+  {  // the page the picture is sitting on (on screen) - it may still 'belong' to another page, e.g. after a Shift drag
+    const s0=TF.sel,src=tfBoxOf(s0.k);
+    if(src){
+      const r0=src._ui.getBoundingClientRect(),kx=r0.width/TFA.aw;
+      let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+      its.forEach(it=>{const b=tfBBox(it);x0=Math.min(x0,b[0]);y0=Math.min(y0,b[1]);x1=Math.max(x1,b[2]);y1=Math.max(y1,b[3])});
+      const px=r0.left+(x0+x1)/2*kx,py=r0.top+(y0+y1)/2*kx;
+      let dst=null,best=1e18;
+      document.querySelectorAll('.tfbox').forEach(b=>{
+        if(!LAY[b._k])return;const q=b.getBoundingClientRect();
+        const dx=Math.max(q.left-px,0,px-q.right),dy=Math.max(q.top-py,0,py-q.bottom),d=dx*dx+dy*dy;   // 0 = right on that page, else the nearest page
+        if(d<best){best=d;dst=b}
+      });
+      if(dst&&dst!==src){
+        tfMoveAcross(src,dst,[...s0.idx],its.map(i=>({...i})),r0,0,0,kx,true);
+        its=tfItems();if(!its.length)return;
+      }
+    }
+  }
   let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
   its.forEach(it=>{const b=tfBBox(it);x0=Math.min(x0,b[0]);y0=Math.min(y0,b[1]);x1=Math.max(x1,b[2]);y1=Math.max(y1,b[3])});
   const bw=x1-x0,bh=y1-y0;if(!(bw>0&&bh>0))return;
