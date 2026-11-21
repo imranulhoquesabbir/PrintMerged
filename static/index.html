@@ -29,6 +29,7 @@ h1{font-size:16px;margin:0 6px 0 0;white-space:nowrap}
 .field label{font-size:12px;color:var(--mut)}
 .field select,.field input{width:100%}
 body.s1 .s2only,body.s2 .s1only{display:none!important}
+#bopen,#close,#stepname{display:none!important}   /* one page only: no 'Step 1 of 2', no 'Back to pages' / 'Preview & Print' */
 
 /* ---------- top bar ---------- */
 #bar{flex:none;z-index:8;background:var(--card);padding:5px 10px;border-bottom:1px solid var(--bd)}
@@ -731,7 +732,7 @@ async function refresh(force){
   if(j.srev!==undefined&&j.srev!==SREV){const first=SREV===-1;SREV=j.srev;if(!first)syncSettings()}
   if(force||j.rev!==REV){
     REV=j.rev;FILES=j.files;GONE.clear();FILES.forEach(f=>(f.gone||[]).forEach(i=>GONE.add(key(f.id,i))));renderFiles();renderPages();
-    if(STEP===2){if(!FILES.length)go(1);else pvRefresh()}
+    if(!FILES.length){if(STEP===2)go(1)}else if(STEP!==2)go(2);else pvRefresh()   // one page: files in = preview page, no files = welcome screen
   }
 }
 async function pickFiles(){
@@ -889,7 +890,6 @@ $('#snone').onclick=()=>selectAll(false);
 function go(n){
   if(n===2){
     if(!FILES.length)return toast('Add a file first');
-    if(!selPages().length)return toast('Tick at least one page to print');
   }
   STEP=n;document.body.className='s'+n;
   $('#v1').hidden=n!==1;$('#v2').hidden=n!==2;
@@ -1145,9 +1145,9 @@ function msg(t){
 }
 $('#pmsg').onclick=()=>$('#pmsg').hidden=true;
 document.addEventListener('keydown',e=>{
-  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='p'){e.preventDefault();if(STEP===1)go(2);else $('#bprint').click()}
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='p'){e.preventDefault();if(STEP===2)$('#bprint').click()}
   else if(e.key==='Escape'){
-    if(!$('#numpanel').hidden)$('#numpanel').hidden=true;else if(TF.on&&TF.sel){TF.sel=null;tfSelChanged()}else if(STEP===2)go(1);
+    if(!$('#numpanel').hidden)$('#numpanel').hidden=true;else if(TF.on&&TF.sel){TF.sel=null;tfSelChanged()}
   }
 });
 
@@ -1324,7 +1324,7 @@ function pvRender(){
   if(!(tfActive()&&nupN()===1))stage.innerHTML='';   // Transform: the old sheets stay until the new ones are ready (no blank flash)
   if(!CAPS||CAPS.error){stage.innerHTML='';return}
   const list=selPages();
-  if(!list.length){stage.innerHTML='';stage.append(el('div',{className:'empty mut',textContent:'No pages selected. Go back and tick the pages to print.'}));return}
+  if(!list.length){stage.innerHTML='';stage.append(el('div',{className:'empty mut',textContent:'No pages selected. Tick the pages to print in the list on the left.'}));return}
   PW=pvNeedPw();
   if(nupN()>1){pvRenderN(list);pvKeep(keepTop);return}
   if(tfActive()){pvRenderT(list,keepTop);return}
