@@ -220,8 +220,8 @@ button:active:not(:disabled){transform:scale(.95)}
 @keyframes vin{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .rp{transition:width .16s ease}
 .tfh{transition:outline-color .12s,background-color .15s,box-shadow .18s}
-.tfh:hover{background:rgba(37,99,235,.07)}
-.tfh.sel{background:rgba(37,99,235,.10)}
+.tfh:hover{background:rgba(37,99,235,.03)}
+.tfh.sel{background:rgba(37,99,235,.035)}
 .tfh .hd{transition:transform .12s ease,background-color .12s,box-shadow .12s;box-shadow:0 1px 4px rgba(0,0,0,.35)}
 .tfh .hd::before{content:'';position:absolute;inset:-8px}               /* bigger grab area, easier to hit */
 .tfh .hd:hover{transform:scale(1.4);background:var(--pri)}
@@ -628,6 +628,7 @@ button,select,input{transition:background-color .15s,border-color .15s,box-shado
     <div class="pcbtns">
       <button id="pcReset" title="Put the corners back around the whole picture"><svg class="ic i-reset" aria-hidden="true"><use href="#i-reset"/></svg> Reset corners</button>
       <button id="pcRemove" title="Go back to the whole, uncropped picture">Remove crop</button>
+      <label class="row" title="After cropping, enlarge the cut-out so it fills the printable area (keeps its shape)"><input type="checkbox" id="pcFit"> <span class="name">Fill the page after crop</span></label>
       <span class="grow mut">Alt = no snapping · arrow keys move the chosen corner · Enter = apply · Esc = cancel</span>
       <button id="pcCancel">Cancel</button>
       <button id="pcOk" class="p">Apply crop</button>
@@ -1317,13 +1318,14 @@ function pvSheetW(){
 function pvNeedPw(){const d=window.devicePixelRatio||1;return HQ?Math.min(3600,Math.max(1200,Math.ceil(pvSheetW()*d*1.5/120)*120)):Math.min(1800,Math.max(720,Math.ceil(pvSheetW()*d/120)*120))}
 function pvRender(){
   if(STEP!==2)return;
-  const stage=$('#pvstage'),keepTop=stage.scrollTop;stage.innerHTML='';
-  if(!CAPS||CAPS.error)return;
+  const stage=$('#pvstage'),keepTop=stage.scrollTop;
+  if(!(tfActive()&&nupN()===1))stage.innerHTML='';   // Transform: the old sheets stay until the new ones are ready (no blank flash)
+  if(!CAPS||CAPS.error){stage.innerHTML='';return}
   const list=selPages();
-  if(!list.length){stage.append(el('div',{className:'empty mut',textContent:'No pages selected. Go back and tick the pages to print.'}));return}
+  if(!list.length){stage.innerHTML='';stage.append(el('div',{className:'empty mut',textContent:'No pages selected. Go back and tick the pages to print.'}));return}
   PW=pvNeedPw();
   if(nupN()>1){pvRenderN(list);pvKeep(keepTop);return}
-  if(tfActive()){pvRenderT(list);return}
+  if(tfActive()){pvRenderT(list,keepTop);return}
   const q=params()+'&pw='+PW,step=dupOn()?2:1,w=pvSheetW()+'px',n=list.length;
   for(let i=0;i<n;i+=step){
     const row=el('div',{className:'pvrow'});
@@ -1561,7 +1563,7 @@ function place(e,it){
   if(e._ang!==undefined)ang=e._ang+((it.rot-e._ang)%360+540)%360-180;
   e._ang=ang;e.style.transform=`rotate(${ang}deg)`;
 }
-async function pvRenderT(list){
+async function pvRenderT(list,keepTop){
   list=tfSheets(list);
   const gen=++tfGen,stage=$('#pvstage'),q=params()+'&pw='+PW;
   let a;try{a=await (await api('/api/area?'+q)).json()}catch{return}
@@ -1570,7 +1572,7 @@ async function pvRenderT(list){
     if(!INFO[k]){try{const j=await (await api(`/api/pageinfo?f=${p.f}&p=${p.p}`)).json();if(j.w)INFO[k]=j}catch{}}
   }));
   if(gen!==tfGen||STEP!==2||!tfActive())return;
-  TFA=a;stage.innerHTML='';
+  TFA=a;const frag=document.createDocumentFragment();
   list.forEach(p=>{if(p.extra)return;const k=key(p.f,p.p);
     if(INFO[k]&&(!LAY[k]||!LAY[k].touched))LAY[k]={items:[defItem(INFO[k],a,p.f,p.p)],touched:false}});
   const step=dupOn()?2:1,w=pvSheetW()+'px',n=list.length;
@@ -1586,13 +1588,20 @@ async function pvRenderT(list){
       const sh=el('div',{className:'pvsheet'},body,capEl);
       sh.style.width=w;row.append(sh);
     });
-    stage.append(row);
-    if(TF.on)stage.append(plusBtn(kk(list[Math.min(i+step,n)-1])));
+    frag.append(row);
+    if(TF.on)frag.append(plusBtn(kk(list[Math.min(i+step,n)-1])));
   }
-  if(TF.on)stage.prepend(plusBtn(null));
-  if(TFSCROLL!==null){stage.scrollTop=TFSCROLL;TFSCROLL=null}
+  if(TF.on)frag.prepend(plusBtn(null));
+  await tfWait([...frag.querySelectorAll('img')]);   // the old sheets stay visible while the new pictures load
+  if(gen!==tfGen||STEP!==2||!tfActive())return;
+  const top=TFSCROLL!==null?TFSCROLL:(keepTop||0);TFSCROLL=null;
+  stage.replaceChildren(frag);stage.scrollTop=top;
   if(!tfItems().length)TF.sel=null;
   tfSync();pvInfo(q);
+}
+function tfWait(ims,ms){   // resolves when all these pictures have loaded (or failed), or after ms
+  ims=ims.filter(i=>!i.complete);if(!ims.length)return Promise.resolve();
+  return Promise.race([Promise.all(ims.map(i=>new Promise(r=>{i.addEventListener('load',r,{once:true});i.addEventListener('error',r,{once:true})}))),new Promise(r=>setTimeout(r,ms||6000))]);
 }
 function plusBtn(after){
   const b=el('button',{className:'tbtn',textContent:'＋',title:'Add a blank white page here'});
@@ -1613,13 +1622,21 @@ function tfSheet(p,a,q,pos){
 }
 function tfBuild(box){
   const L=LAY[box._k],mono=$('#color').value!=='color';
-  box._clip.innerHTML='';box._vis=[];
+  const old=[...box._clip.children],tok=box._bt=(box._bt||0)+1,fresh=[];
+  box._vis=[];
   L.items.forEach(it=>{
     const im=el('img',{className:'tfi',alt:'',draggable:false,src:`/api/src?f=${it.f}&p=${it.p}&px=${HQ?3000:1600}&hq=${HQ?1:0}&v=${REV}`+(it.crop?'&crop='+it.crop.map(v=>+(+v).toFixed(6)).join(','):'')});
     if(mono)im.style.filter='grayscale(1)';
-    place(im,it);box._clip.append(im);box._vis.push(im);
+    place(im,it);
+    if(old.length)im.style.visibility='hidden';   // the old picture stays until this one is ready
+    box._clip.append(im);box._vis.push(im);fresh.push(im);
   });
-  if(TF.on&&!L.items.length)box._clip.append(el('div',{className:'tfempty',textContent:'Blank page · drag a picture here, press Ctrl+V, or use Add picture'}));
+  if(TF.on&&!L.items.length){const em=el('div',{className:'tfempty',textContent:'Blank page · drag a picture here, press Ctrl+V, or use Add picture'});box._clip.append(em);fresh.push(em)}
+  if(old.length)tfWait(fresh.filter(n=>n.tagName==='IMG')).then(()=>{
+    if(box._bt!==tok)return;
+    [...box._clip.children].forEach(c=>{if(!fresh.includes(c))c.remove()});
+    fresh.forEach(c=>{if(c.style.visibility==='hidden'){c.style.visibility='';if(c.classList.contains('born')){c.classList.remove('born');void c.offsetWidth;c.classList.add('born')}}});
+  });
   tfHits(box);
 }
 const HANDLES=[[-1,-1,'nwse'],[0,-1,'ns'],[1,-1,'nesw'],[1,0,'ew'],[1,1,'nwse'],[0,1,'ns'],[-1,1,'nesw'],[-1,0,'ew']];
@@ -2071,12 +2088,20 @@ async function pcApply(remove){
   if(full&&!it.crop){pcClose();return}
   tfSnap();
   const [nw,nh]=full?[inf.w,inf.h]:pcNat(PC.q,inf);
-  const s=Math.min(it.w/nw,it.h/nh);                 // the new shape fits inside the box the picture had, same centre
+  let s=Math.min(it.w/nw,it.h/nh);                 // the new shape fits inside the box the picture had, same centre
+  const pf=$('#pcFit');
+  if(!full&&pf&&pf.checked&&TFA){   // optional: enlarge the cut-out to fill the printable area (turn-aware), centred
+    const sideways=Math.abs(it.rot||0)%180===90,aw=sideways?TFA.ah:TFA.aw,ah=sideways?TFA.aw:TFA.ah;
+    s=Math.min(aw/nw,ah/nh);it.cx=TFA.aw/2;it.cy=TFA.ah/2;
+  }
   if(full)delete it.crop;else it.crop=PC.q.map(v=>+v.toFixed(6));
   it.w=nw*s;it.h=nh*s;L.touched=true;
   const k=PC.k;pcClose();tfRebuild(k);
+  { const b=tfBoxOf(k);if(b)b.scrollIntoView({block:'nearest',behavior:'smooth'}) }   // make sure the cropped page is on screen
   tfFlash('✂',full?'Crop removed':'Perspective crop applied');
 }
+try{$('#pcFit').checked=localStorage.getItem('pcFit')==='1'}catch{}
+$('#pcFit').onchange=()=>{try{localStorage.setItem('pcFit',$('#pcFit').checked?'1':'0')}catch{}};
 $('#pcOk').onclick=()=>pcApply(false);
 $('#pcRemove').onclick=()=>pcApply(true);
 $('#pcCancel').onclick=pcClose;
