@@ -628,7 +628,7 @@ button,select,input{transition:background-color .15s,border-color .15s,box-shado
     <div class="pcbtns">
       <button id="pcReset" title="Put the corners back around the whole picture"><svg class="ic i-reset" aria-hidden="true"><use href="#i-reset"/></svg> Reset corners</button>
       <button id="pcRemove" title="Go back to the whole, uncropped picture">Remove crop</button>
-      <label class="row" title="After cropping, enlarge the cut-out so it fills the printable area (keeps its shape)"><input type="checkbox" id="pcFit"> <span class="name">Fill the page after crop</span></label>
+      <label class="row" title="After cropping, fit the cut-out inside the printable area (same shape, nothing cut off, centred)"><input type="checkbox" id="pcFit"> <span class="name">Fit to printable area</span></label>
       <span class="grow mut">Alt = no snapping · arrow keys move the chosen corner · Enter = apply · Esc = cancel</span>
       <button id="pcCancel">Cancel</button>
       <button id="pcOk" class="p">Apply crop</button>
@@ -2090,7 +2090,7 @@ async function pcApply(remove){
   const [nw,nh]=full?[inf.w,inf.h]:pcNat(PC.q,inf);
   let s=Math.min(it.w/nw,it.h/nh);                 // the new shape fits inside the box the picture had, same centre
   const pf=$('#pcFit');
-  if(!full&&pf&&pf.checked&&TFA){   // optional: enlarge the cut-out to fill the printable area (turn-aware), centred
+  if(!full&&pf&&pf.checked&&TFA){   // optional (checkbox): fit the cut-out inside the printable area (turn-aware), centred
     const sideways=Math.abs(it.rot||0)%180===90,aw=sideways?TFA.ah:TFA.aw,ah=sideways?TFA.aw:TFA.ah;
     s=Math.min(aw/nw,ah/nh);it.cx=TFA.aw/2;it.cy=TFA.ah/2;
   }
