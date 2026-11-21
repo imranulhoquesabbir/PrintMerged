@@ -1978,13 +1978,18 @@ async function tfCropOpen(){
   const inf=await tfInfoOf(f,p);if(!inf)return toast('Could not read this picture.');
   Object.assign(PC,{open:true,k,i,f,p,q:q0||[.03,.03,.97,.03,.97,.97,.03,.97],sel:-1,had,url:''});
   $('#pcRemove').hidden=!had;$('#pcinfo').textContent='Loading the picture…';
+  const tok=PC.tok=(PC.tok||0)+1,img=$('#pcimg');
+  $('#pcsvg').replaceChildren();      // forget the corners of the last crop, so an old page never flashes up
+  img.onload=pcLayout;img.src=`/api/src?f=${f}&p=${p}&px=700&hq=0&v=${REV}`;   // quick small copy of THIS page right away (same shape), the sharp one replaces it
   $('#pcmodal').hidden=false;
+  let url='';
   try{   // the WHOLE page (not the old crop), big and sharp, so the corners can be placed exactly
     const r=await api(`/api/src?f=${f}&p=${p}&px=2400&hq=1&v=${REV}`);
     if(!r.ok)throw 0;
-    PC.url=URL.createObjectURL(await r.blob());
-  }catch{pcClose();return toast('Could not load the picture.')}
-  const img=$('#pcimg');img.onload=pcLayout;img.src=PC.url;
+    url=URL.createObjectURL(await r.blob());
+  }catch{if(PC.open&&PC.tok===tok){pcClose();toast('Could not load the picture.')}return}
+  if(!PC.open||PC.tok!==tok){URL.revokeObjectURL(url);return}   // closed (or another crop opened) while loading
+  PC.url=url;img.onload=pcLayout;img.src=url;
 }
 function pcClose(){
   PC.open=false;$('#pcmodal').hidden=true;$('#pcloupe').style.display='none';
